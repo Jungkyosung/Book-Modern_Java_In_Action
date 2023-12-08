@@ -1132,7 +1132,220 @@ public class ToListCollector<T> implements Collector<T, List<T>, List<T>>
 
 Collector 인터페이스의 메서드 살펴보기
 
+characteristics는 collect 메서드가 어떤 최적화(ex, 병렬화)를 이용해서 리듀싱 연산을 수행할 것인지 결정하도록 돕는 힌트 특성 집합을 제공한다.
+나머지 네 메서드는 collect 메서드에서 실행하는 함수를 반환한다.
 
+supplier 메서드 : 새로운 결과 컨테이너 만들기
+
+supplier메서드는 빈 결과로 이루어진 Supplier를 반환해야 한다.
+supplier는 수집 과정에서 빈 누적자 인스턴스를 만드는 파라미터가 없는 함수이다.
+
+ToListCollector에서 supplier는 빈 리스트를 반환함.
+
+public Supplier<List<T>> supplier() {
+	return () -> new ArrayList<T>();
+}
+
+public Supplier<List<T>> supplier() {
+	return ArrayList::new;
+}
+
+
+accumulator 메서드 : 결과 컨테이너에 요소 추가하기
+accumulator메서드는 리듀싱 연산을 수행하는 함수를 반환.
+스트림에서 n번째 요소를 탐색할 때 두 인수, 누적자(스트림의 첫 n-1개 항목을 수집한 상태)와 n번째 요소를 함수에 적용.
+함수의 반환 값은 void, 즉 요소를 탐색하면서 적용하는 함수에 의해 누적자 내부상태가 바뀌므로 누적자가 어떤 값일지 단정할 수 없다. 
+ToListCollector에서 accumulator가 반환하는 함수는 이미 탐색한 항목을 포함하는 리스트에 현재 항목을 추가하는 연산을 수행.
+
+public BiConsumer<List<T>,T> accumulator() {
+	return (list, item) -> list.add(item);
+}
+
+public BiConsumer<List<T>, T> accumulator() {
+	return List::add;
+}
+
+
+finisher 메서드 : 최종 변환값을 결과 컨테이너로 적용하기
+
+finisher메서드는 스트림 탐색을 끝내고 누적자 객체를 최종 결과로 변환하면서 누적 과정을 끝낼 때 호출할 함수를 반환해야 한다. 
+?약간 finally와 같은 건가?
+public Function<List<T>, List<T>> finisher() {
+	 return Function.identity();
+}
+
+
+combiner 메서드 : 두 결과 컨테이너 병합
+
+combiner메서드는 스트림의 서로 다른 서브파티를 병렬로 처리할 때 누적자가 이 결과를 어떻게 처리할지 정의.
+toList의 combiner는 비교적 쉽게 구현 가능.
+
+public BinaryOperator<List<T>> combiner() {
+	return (list1, list2) -> {
+		list1.addAll(list2);
+		return list1;
+	}
+}
+
+네 번째 메서드를 이용하면 스트림의 리듀싱을 병렬로 수행할 수 있다. 
+병렬로 수행할 때 자바7의 포크/조인 프레임워크와 Spliterator를 사용함.
+- 스트림을 분할해야 하는지 정의하는 조건이 거짓으로 바뀌기 전까지 원래 스트림을 재귀적으로 분할한다.(보통 분산된 작업의 크기가 너무 작아지면 병렬 수행 속도는 순차 수행 속도보다 느려진다.)
+- 이제 모든 서브스트림의 각 요소에 리듀싱 연산을 순차적으로 적용해서 서브스트림을 병렬로 처리 가능.
+- 마지막엔 컬렉터의 combiner메서드가 반환하는 함수로 모든 부분결과를 쌍으로 합침.
+
+
+Characteristics 메서드
+컬렉터의 연산을 정의하는 characteristics 형식의 불변 집합을 반환. 스트림을 병렬로 리듀스할 것인지 그리고 병렬로 리듀스한다면 어떤 최적화를 선택해야 할지 힌트를 제공. 
+Characteristics는 다음 세 항목을 포함하는 열거형이다.
+- UNORDERED : 리듀싱 결과는 스트림 요소의 방문 순서나 누적 순서에 영향을 받지 않는다.
+- CONCURRENT : 다중 스레드에서 accumulator 함수를 동시에 호출할 수 있으며 이 컬렉터는 스트림의 병렬 리듀싱을 수행할 수 있다. 컬렉터의 플래그에 UNORDERED를 함께 설정하지 않았다면 데이터 소스가 정렬되어 있지 않은 상황에서만 병렬 리듀싱을 수행할 수 있다.
+- IDENTITY_FINISH : finisher 메서드가 반환하는 함수는 단순히 identity를 적용할 뿐이므로 이를 생략할 수 있다. 따라서 리듀싱 과정의 최종 결과로 누적자 객체를 바로 사용할 수 있다. 또한 누적자 A를 결과R로 안전하게 형변환할 수 있다.
+
+지금까지 개발한 ToListCollector에서 스트림의 요소를 누적하는 데 사용한 리스트가 최종결과 형식이므로 추가 변환이 필요 없다. 따라서 ToListCollector는 IDENTITY_FINISH다.
+하지만 리스트의 순서는 상관이 없으므로 UNORDERED다. 마지막으로 ToListCollector는 CONCURRENT다. 하지만 이미 설명했듯이 요소의 순서가 무의미한 데이터 소스여야 병렬로 실행할 수 있다.
+
+
+응용하기
+
+지금까지 살펴본 다섯 가지 메서드를 이용해 자신만의 커스텀 ToListCollector를 구현할 수 있다.
+
+public class ToListCollector<T> implements Collector<T, List<T>, List<T>> {
+	@Override
+	public Supplier<List<T>> supplier() {
+		return ArrayList::new;	//수집 연산의 시발점
+	}
+
+	@Override
+	public BiConsumer<List<T>, T> accumulator() {
+		return List::add;  //탐색한 항목을 누적하고 바로 누적자를 고침. 
+	}
+
+	@Override
+	public Function<List<T>, List<T>> finisher() {
+		return Function.identity();  //항등함수
+	}
+
+	@Override
+	public BinaryOperator<List<T>> combiner() {
+		return (list1, list2) -> {
+			list1.addAll(list2);	
+			return list1;
+		}
+	}
+
+	@Override
+	public Set<Characteristics> characteristics() {
+		return Collections.unmodifiableSet(EnumSet.of(
+			IDENTITY_FINISH, CONCURRENT));
+	}
+}
+
+위 구현이 Collectors.toList 메서드가 반환하는 결과와 완전히 같은 것은 아니지만 사소한 최적화를 제외하면 대체로 비슷. 특히 자바API에서 제공하는 컬렉터는 싱글턴 Collections.emptyList()로 빈 리스트를 반환한다. 
+
+List<Dish> dishes = menuStream.collect(new ToListCollector<Dish>());
+
+다음은 기존의 코드다.
+
+List<Dish> dishes = menuStream.collect(toList());
+
+기존 코드의 toList는 팩토리지만 ToListCollector는 new로 인스턴스화한다는 점이 다르다.
+
+
+컬렉터 구현을 만들지 않고도 커스텀 수집 수행하기
+
+IDENTITY_FINISH 수집 연산에서는 Collector 인터페이스를 완전히 새로 구현하지 않고도 같은 결과를 얻을 수 있다. Stream은 세 함수(발행, 누적, 합침)를 인수로 받는 collect 메서드를 오버로드하며 각각의 메서드는 Collector인터페이스의 메서드가 반환하는 함수와 같은 기능을 수행한다. 
+
+예를 들어 스트림의 모든 항목을 리스트에 수집하는 방법도 있다.
+
+List<Dish> dishes = menuStream.collect(
+	ArrayList::new,  //발행
+	List::add,	//누적
+	List::addAll);	//합침
+	
+두 번째 코드가 이전 코드에 비해 좀 더 간결하고 축약되어 있지만, 가독성은 떨어진다.
+커스텀 컬렉터를 구현하는 편이 중복을 피하고 재사용성을 높이는 데 도움이 된다.
+
+두 번째 collect메서드로는 Characteristics를 전달할 수 없다. 
+즉 IDENTITY_FINISH와 CONCURRENT지만 UNORDERED는 아닌 컬렉터로만 동작한다.
+
+
+커스텀 컬렉터를 구현해서 성능 개선하기
+
+n이하의 자연수를 소수와 비소수로 분류하기(과거 예제)
+public Map<Boolean, List<Integer>> partitionPrimes(int n) {
+	return IntStream.rangeClosed(2, n).boxed()
+		.collect(partitioningBy(candidate -> isPrime(candidate));
+}
+
+위 코드에서 isPrime메서드를 제곱근 이하로 대상의 숫자 범위를 제한해서 메서드를 개선함.
+
+커스텀 컬렉터를 이용해서 성능을 더 개선해보자.
+
+
+소수로만 나누기
+
+우선 소수로 나누어떨어지는지 확인해서 대상의 범위를 좁힐 수 있다. 제수가(devisor) 소수가 아니면 소용없으므로 제수를 현재 숫자 이하에서 발견한 소수로 제한할 수 있다. 
+
+중간결과 리스트가 있다면 isPrime 메서드로 중간 결과 리스트를 전달하도록 다음과 같이 코드를 구현할 수 있다.
+public static boolean isPrime(List<Integer> primes, int candidate) {
+	return primes.stream().noneMatch(i -> candidate % 1 == 0);
+}
+
+이번에도 대상 숫자의 제곱근보다 작은 소수만 사용하도록 코드를 최적화해야 한다.
+현재 숫자 이하를 반환하는 takeWhile메서드를 구현한다.
+
+public static boolean isPrime(List<Integer> primes, int candidate) {
+	int candidateRoot = (int) Math.sqrt((double) candidate);	
+	return primes.stream()
+		.takeWhile(i -> i <= candidateRoot)
+		.noneMatch(i -> candidate % 1 == 0);
+}
+
+
+takeWhile은 자바9의 기능으로 자바8에선 어떻게 해야 할까?
+takeWhile을 직접 구현해 보자.
+
+public static <A> List<A> takeWhile(List<A> list, Predicate<A> p) {
+	int i = 0;
+	for (A item : list){
+		if (!p.test(item)) {	
+			//리스트의 현재 항목이 프레이케이트를 만족하는지 확인
+			//만족하지 않으면 현재 검사한 항목의 이전 항목 하위 리스트
+			//반환
+			return list.subList(0, 1);
+		}
+		i++;
+	}
+	//리스트의 모든 항목이 프레디케이트를 만족하므로 리스트 자체 반환
+	return list; 
+}
+
+스트림API와 달리 직접 구현한 takeWhile메서드는 적극적으로 동작한다. 따라서 가능하면 noneMatch 동작과 조화를 이룰 수 있도록 자바9의 게으른 버전의 takeWhile을 사용하는 것이 좋다.
+
+게으르다는 게 정확히 어떤 동작이더라? 계산을 미리 하지 않는다. 좀 더 구체적으로 알아봐야겠음.
+
+
+새로운 isPrime메서드를 구현했으니 본격적으로 커스텀 컬렉터를 구현하자. 우선 Collector인터페이스를 구현하는 새로운 클래스를 선언한 다음에 Collector인터페이스에서 요구하는 메서드 다섯 개를 구현한다.
+
+1단계 : Collector 클래스 시그니처 정의
+
+다음의 Collector 인터페이스 정의를 참고해서 클래스 시그니처를 만들자.
+
+public interface Collector<T, A, R>
+
+위 코드에서 T는 스트림 요소의 형식, A는 중간 결과를 누적하는 객체의 형식, R은 collect 연산의 최종 결과 형식을 의미한다. 
+우리는 정수로 이루어진 스트림에서 누적자와 최종 결과의 형식이 Map<Boolean, List<Integer>> 인 컬렉터를 구현해야 한다. 즉, Map<Boolean, List<Integer>>는 참과 거짓을 키로, 소수와 소수가 아닌 수를 값으로 갖는다.
+
+public class PrimeNumbersCollector implements Collector
+	<Integer,			//계산자
+	Map<Boolean, List<Integer>>,	//누적자
+	Map<Boolean, List<Integer>>>	//최종결과
+
+2단계 : 리듀싱 연산 구현
+
+이번에는 Collector 인터페이스에 선언된 다섯 메서드를 구현해야 한다. supplier메서드는 누적자를 만드는 함수를 반환해야 한다.
+
+public Supplier<Map<Boolean, List<Integer>>> supplier() {
 
 
 
