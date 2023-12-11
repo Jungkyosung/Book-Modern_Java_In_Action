@@ -1346,16 +1346,371 @@ public class PrimeNumbersCollector implements Collector
 이번에는 Collector 인터페이스에 선언된 다섯 메서드를 구현해야 한다. supplier메서드는 누적자를 만드는 함수를 반환해야 한다.
 
 public Supplier<Map<Boolean, List<Integer>>> supplier() {
+	return () -> new HashMap<Boolean, List<Integer>>() {{
+		put(true, new ArrayList<Integer>());
+		put(false, new ArrayList<Integer>());
+	}};
+}
+
+(익명 클래스를 사용해서 Map에 초기값을 부여)
+
+스트림의 요소를 어떻게 수집할지 결정하는 것은 accumulator 메서드이다. 가장 중요한 메서드이다. 최적화의 핵심이다. 
+
+public BiConsumer<Map<Boolean, List<Integer>>, Integer> accumulator() {
+	return (Map<Boolean, List<Integer>> acc, Integer candidate) -> {
+		acc.get( isPrime(acc.get(true), candidate) )
+		.add(candidate);
+	};
+}
+
+위 코드에서 지금까지 발견한 소수리스트(누적 맵의 true키로 접근)와 소수 여부를 확인하는 candidate를 인수로 isPrime 메서드를 호출.
+
+
+3단계 : 병렬 실행할 수 있는 컬렉터 만들기(가능하다면)
+
+병렬 수집 과정에서 두 부분 누적자를 합칠 수 있는 메서드를 만든다. 
+
+public BinaryOperator<Map<Boolean, List<Integer>>> combiner() {
+	return (Map<Boolean, List<Integer>> map1, Map<Boolean, List<Integer>> map2) -> {
+		map1.get(true).addAll(map2.get(true));
+		map1.get(false).addAll(map2.get(false));
+		return map;
+	};
+}
+(true면 true에 추가하고, false면 false에 추가)
+
+참고로 알고리즘 자체가 순차적이어서 컬렉터를 실제 병렬로 사용할 순 없다. 따라서 combiner메서드는 호출될 일이 없으므로 빈 구현으로 남겨둘 수 있다.(또는 UnsupportedOperationException을 던지도록 구현하는 방법도 좋다.) 실제로 이 메서드는 사용할 일이 없지만 학습을 목적으로 구현한 것이다.
+(이게 먼말이여??)
+
+4단계 : finisher메서드와 컬렉터의 characteristics메서드
+나머지 두 메서드는 쉽게 구현할 수 있다. 
+
+accumulator의 형식은 컬렉터 결과 형식과 같으므로 변환과정이 필요 없다. 따라서 항등 함수 identity를 반환하도록 finisher메서드를 구현한다.
+
+public Function<Map<Boolean, List<Integer>>,
+		Map<Boolean, List<Integer>>> finisher() {
+	return Function.identity();
+}
+
+커스텀 컬렉터는 CONCURRENT도 아니고 UNORDERED도 아니지만 IDENTITY_FINISH이므로 다음처럼 characteristics 메서드를 구현할 수 있다.
+
+public Set<Characteristics> characteristics() {
+	return Collections.unmodifiableSet(EnumSet.of(IDENTITY_FINISH));
+}
+
+PrimeNumberCollector의 최종 구현 코드
+public class PrimeNumbersCollector implements Collector<Integer, Map<Boolean, List<Integer>>,
+Map<Boolean, List<Integer>>> {
+	@Override
+	public Supplier<Map<Boolean, List<Integer>>> supplier() {
+		return () -> new HashMap<Boolean, List<Integer>> () {{
+			put(true, new ArrayList<Integer>());
+			put(false, new ArrayList<Integer>());
+		}};
+	}
+
+	@Override
+	public BiConsumer<Map<Boolean, List<Integer>>, Integer> accumulator() {
+		return (Map<Boolean, List<Integer>> acc, Integer candidate) -> {
+			acc.get( isPrime(acc.get(true), candidate)
+			.add(candidate);
+		};
+	}
+	
+	@Override
+	public BinaryOperator<Map<Boolean, List<Integer>>> combiner() {
+		return (Map<Boolean, List<Integer>> map1,
+			Map<Boolean, List<Integer>> map2) -> {
+			map1.get(true).addAll(map2.get(true));
+			map1.get(false).addAll(map2.get(false));
+			return map1;
+		};
+	}
+
+	@Override
+	public Function<Map<Boolean, List<Integer>>, Map<Boolean, List<Integer>>>  finisher() {
+		return Function.identity();
+	}
+
+	@Override
+	public Set<Characteristics> characteristics() {
+		return Collections.unmodifiableSet(EnumSet.of(IDENTITY_FINISH));
+	}
+}
+
+
+마치며
+- collect는 스트림의 요소를 요약 결과로 누적하는 다양한 방법(컬렉터라 불리는)을 인수로 갖는 최종 연산.
+- 스트림의 요소를 하나의 값으로 리듀스하고 요약하는 컬렉터뿐 아니라 최솟값, 최댓값, 평균값을 계산하는 컬렉터 등이 미리 정의되어 있다.
+- 미리 정의된 컬렉터인 groupingBy로 스트림의 요소를 그룹화하거나, partioningBy로 스트림의 요소를 분할할 수 있다.
+- 컬렉터는 다수준의 그룹화, 분할, 리듀싱 연산에 적합하게 설계되어 있다.
+- Collector 인터페이스에 정의된 메서드를 구현해서 커스텀 컬렉터를 개발할 수 있다.
 
 
 
+병렬 데이터 처리와 성능
+
+자바 7 등장 전에는 데이터 컬렉션을 병렬로 처리하기가 어려웠다. 우선 데이터를 서브파트로 분할 -> 분할된 서브파트를 각각의 스레드로 할당 -> 의도치 않은 레이스 컨디션(경쟁상태)이 발생하지 않도록 적절한 동기화 추가 -> 부분 결과 합침.
+자바7은 더 쉽게 병렬화를 수행하면서 에러를 최소화할 수 있도록 포크/조인 프레임워크 기능을 제공한다.
+
+스트림을 이용하면 순차 스트림을 병렬 스트림으로 자연스럽게 바꿀 수 있다.
+병렬 스트림이 내부적으로 어떻게 처리되는지 알고 스트림을 잘못 사용하는 상황을 피하자.
+
+여러 청크를 병렬로 처리하기 전에 병렬 스트림이 요소를 여러 청크로 분할하는 방법을 설명. 이 원리를 이해하지 못하면 의도치 않은, 설명하기 어려운 결과가 발생할 수 있다. 따라서 커스텀 Spliterator를 직접 구현하면서 분할 과정을 우리가 원하는 방식으로 제어하는 방법도 설명한다.
 
 
+병렬 스트림
+
+컬렉션에 parallelStream을 호출하면 병렬 스트림이 생성된다. 병렬 스트림이란 각각의 스레드에서 처리할 수 있도록 스트림 요소를 여러 청크로 분할한 스트림이다. 따라서 병렬 스트림을 이용하면 모든 멀티코어 프로세서가 각각의 청크를 처리하도록 할당할 수 있다.
+
+숫자 n을 인수로 받아서 1부터 n까지 모든 숫자의 합계를 반환하는 메서드를 구현할 시.
+//스트림 사용
+public long sequentialSum(long n) {
+	return Stream.iterate(1L, i -> i + 1)
+			.limit(n)
+			.reduce(0L, Long::sum);	//BinaryOperator로 리듀싱 작업 수행
+}
+
+//전통적인 자바
+public long iterativeSum(long n) {
+	long result = 0;
+	for (long i = 1L; i <= n; i++) {
+		result += i;
+	}
+	return result;
+}
+
+n이 커진다면 연산을 병렬로 처리하는 것이 좋을 것이다.
+병렬 연산시 고려해야 할 것들은 무엇이 있을까?
+1. 결과 변수는 어떻게 동기화해야 할까?
+2. 몇 개의 스레드를 사용해야 할까?
+3. 숫자는 어떻게 생성할까?
+4. 생성된 숫자는 누가 더할까?
+
+위의 고민을 병렬 스트림을 이용하면 쉽게 해결할 수 있다.
 
 
+순차 스트림을 병렬 스트림으로 변환하기
+
+public long parallelSum(long n) {
+	return Stream.iterator(1L, i -> i + 1)
+		.limit(n)
+		.parallel()	//스트림을 병렬로 변환
+		.reduce(0L, Long::sum);
+}
+
+리듀싱 연산을 여러 청크에 병렬로 수행하고 생성된 부분 결과를 다시 리듀싱 연산으로 합쳐서 전체 스트림의 리듀싱 결과를 도출한다.
+
+순차스트림에 parallel을 호출해도 스트림 자체에는 아무 변화도 일어나지 않는다. 내부적으로는 parallel을 호출하면 이후 연산이 병렬로 수행되어야 함을 의미하는 불리언 플래그가 설정된다. 반대로 sequential은 병렬을 순차로 바꿀 수 있다.
+
+stream.parallel()
+	.filter(...)
+	.sequential()
+	.map(...)
+	.parallel()
+	.reduce();
+
+parallel과 sequential 두 메서드 중 최종적으로 호출된 메서드가 전체 파이프라인에 영향을 미친다.
+최종 호출이 parallel이므로 전체적으로 병렬로 실행된다.
 
 
+병렬 스트림에서 사용하는 스레드 풀 설정
+
+병렬 스트림은 내부적으로 ForkJoinPool을 사용한다. 기본적으로 프로세서 수, Runtime.getRuntime().availableProcessors()가 반환하는 값에 상응하는 스레드를 갖는다.
 
 
+System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", "12");
+전역 설정 코드이므로 이후의 모든 병렬 스트림 연산에 영향을 준다. 현재는 하나의 병렬 스트림에 사용할 수 있는 특정한 값을 지정할 수 없다. 일반적으로 기기의 프로세서 수와 같으므로 특별한 이유가 없다면 ForkJoinPool의 기본값을 그대로 사용할 것.
+
+[ 반복형 / 순차 리듀싱 / 병렬 리듀싱 ] 중 어느 것이 가장 빠를지 확인해보자.
 
 
+스트림 성능 측정
+
+병렬화를 이용하면 순차나 반복 형식에 비해 성능이 더 좋아질 것이라 추측했다.
+소프트웨어 공학에선 추측보단 측정을 해야 한다.
+자바 마이크로벤치마크 하니스(JMH)라는 라이브러리를 통해 작은 벤치마크를 구현하자.
+JMH는 어노테이션 기반 방식을 지원, 안정적으로 JVM기반 벤치마크를 구현 가능.
+사실 JVM으로 실행되는 프로그램을 벤치마크하는 작업은 쉽지 않다.
+핫스팟이 바이트코드를 최적화 하는데 필요한 준비시간, 가비지 컬렉터로 인한 오버헤드 등과 같은 여러 요소를 고려해야하기 때문이다.
+메이븐 빌드 도구를 사용한다면 메이븐 빌드 과정을 정의하는 pom.xml 파일에 몇 가지 의존성을 추가해 프로젝트에서 JMH를 사용할 수 있다. (당연히 gradle도 가능)
+
+<dependency>
+	<groupId>org.openjdk.jmh</groupId>
+	<artifactId>jmh-core</artifacId>
+	<version>1.17.4</version>
+</dependency>
+<dependency>
+	<groupId>org.openjdk.jmh</groupId>
+	<artifactId>jmh-generator-annprocess</artifactId>
+	<version>1.17.4</version>
+</dependency>
+
+첫 번째 라이브러리는 핵심 JMH 구현을 포함하고 두 번째 라이브러리는 자바 아카이브(JAR)파일을 만드는 데 도움을 주는 어노테이션 프로세서를 포함한다.
+다음 플러그인도 추가한 다음 아카이브 파일을 이용해서 벤치마크를 편리하게 실행할 수 있다.
+
+<build>
+  <plugins>
+    <plugin>
+      <groupId>org.apache.maven.plugins</groupId>
+      <artifactId>maven-shade-plugin</artifactId>
+      <executions>
+        <execution>
+          <phase>package</phase>
+          <goals><goal>shade</goal></goals>
+          <configuration>
+            <finalName>benchmarks</finalName>
+            <transformers>
+              <transformer implementation=
+                "org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                <mainClass>org.openjdk.jmh.Main</mainClass>
+              </transformer>
+            </transformers>
+          </configuration>
+	</execution>
+      </executions>
+    </plugin>
+  </plugins>
+</build>
+
+
+n개의 숫자를 더하는 함수의 성능 측정
+
+@BenchmarkMode(Mode.AverageTime)       //벤치마크 대상 메서드 실행시 걸린 평균시간 측정
+@OutputTimeUnit(TimeUnit.MILLISECONDS) //벤치마크 결과 밀리초 단위 출력
+@Fork(2, jvmArgs="-Xms4G", "-Xmx4G"})  //4Gb의 힙 공간을 제공한 환경에서 두 번 벤치마크 수행(결과 신뢰성 확보)
+public class ParalleStreamBenchmark {
+	private static final long N= 10_000_000L;
+	
+	@Benchmark   //벤치마크 대상 메서드
+	public long sequentialSum(){
+		return Stream.iterate(1L, i -> i + 1).limit(n).reduce( 0L, Long::sum);
+	}
+
+	@TearDown(Level.Invocation)  //매 번 벤치마크 실행한 다음에는 가비지 컬렉터 동작 시도
+	public void tearDown(){
+		System.gc();
+	}
+}
+
+클래스를 컴파일하면 이전에 설정한 메이븐 플러그인이 benchmarks.jar라는 두 번째 파일을 만든다.
+파일을 실행하자.
+
+java -jar ./target/benchmarks.jar ParallelStreamBenchmark
+
+벤치마크가 가능한 가비지 컬렉터의 영향을 받지 않도록 힙의 크기를 충분하게 설정했다.
+또한 벤치마크 끝날 때마다 가비지 컬렉터를 실행하도록 강제했다.
+이렇게 주의를 기울였지만 여전히 결과는 정확하지 않을 수 있다.
+기계가 지원하는 코어의 갯수 등이 실행 시간에 영향을 미칠 수 있다.
+
+JMH 명령은 핫스팟이 코드를 최적화 할 수 있도록 20번을 실행하며 벤치마크를 준비한 다음 20번을 더 실행해 최종결과를 계산한다. 
+JMH는 기본적으로 20 + 20 회 반복 실행한다.
+JMH의 특정 어노테이션이나 -w, -i플래그를 사용해서 횟수를 조절할 수 있다.
+
+벤치마크를 실행하니 반복 > 순차 > 병렬 순으로 속도가 빨랐다.
+왜 그럴까?
+
+두 가지 문제가 있다.
+- 반복 결과로 박싱된 객체가 만들어지므로 숫자를 더하려면 언박싱을 해야 한다.
+- 반복 작업은 병렬로 수행할 수 있는 독립 단위로 나누기가 어렵다.  (머여 어캄 그럼? 왜 만듬?)
+
+ 
+iterate는 본질적으로 순차적이다. 병렬로 실행했어도 결국 순차처리 방식과 크게 다른 점이 없고 스레드를 할당하는 오버헤드만 증가했다.
+
+병렬 프로그래밍은 병렬과 거리가 먼 반복 작업을 하면 오히려 성능이 더 나빠질 수 있다.
+그렇다보니 parallel 메서드를 호출했을 때 내부처리과정을 잘 이해해야 한다.
+
+
+더 특화된 메서드 사용
+멀티코어 프로세서를 활용해서 효과적으로 합계 연산을 병렬로 실행하려면?
+rangeClosed는 iterate에 비해 아래와 같은 장점이 있다.
+- LongStream.rangeClosed는 기본형 long을 직접 사용하므로 박싱과 언박싱 오버헤드가 사라짐.
+- LongStream.rangeClosed는 쉽게 청크로 분할할 수 있는 숫자 범위를 생산한다.
+  예를 들어, 1-20 범위의 숫자를 1-5, 6-10, 11-15, 16-20범위의 숫자로 분할할 수 있다.
+
+
+@Benchmark
+public long rangeSum(){
+	return LongStream.rangeClosed(1,N)
+		.reduce(0L, Long::sum);
+}
+
+iterate보다 처리속도가 더 빠르다. 오토박싱, 언박싱 등의 오버헤드가 사라졌다.
+이걸 통해 상황에 따라서는 어떤 알고리즘을 병렬화하는 것보다 적절한 자료구조를 선택하는 것이 더 중요하다는 사실을 알 수 있다.
+그렇다면 병렬처리를 하면 어떨까?
+
+@Benchmark
+public long parallelRangeSum() {
+	return LongStream.rangeClosed(1, N)
+		.parallel()
+		.reduce(0L, Long::sum);
+}
+
+순차 실행보다 빠른 병렬 리듀싱이다. 반복처리보다 빨랐다.
+하지만 병렬화를 이용하려면 스트림을 재귀적으로 분할해야 하고, 각 서브스트림을 서로 다른 스레드의 리듀싱 연산으로 할당하고, 이들 결과를 하나의 값으로 합쳐야 한다. 멀티코어 간의 데이터 이동은 우리 생각보다 비싸다. 따라서 코어 간에 데이터 전송 시간보다 훨씬 오래 걸리는 작업만 병렬로 다른 코어에서 수행하는 것이 바람직하다.
+
+
+병렬 스트림의 올바른 사용법
+
+주요 문제는 공유된 상태를 바꾸는 알고리즘을 사용하는 것.
+다음은 n까지의 자연수를 더하면서 공유된 누적자를 바꾸는 프로그램을 구현한 코드다.
+
+public long sideEffectSum(long n) {
+	Accumulator accumulator = new Accumulator();
+	LongStream.rangeClosed(1, n).forEach(accumulator::add);
+	return accumulator.total;
+}
+
+public class Accumulator{
+	public long total = 0;
+	public void add(long value) { total += value; }
+}
+
+위 코드의 문제는? 순차 실행시엔 문제가 없으나, 병렬 실행시 문제 발생
+total에 접근할 때, 다수의 스레드에서 동시에 접근하면서 데이터 레이스 문제가 일어난다.
+동기화로 문제를 해결하면 결국 병렬화의 특성이 없어져 버릴 것이다.
+
+public long sideEffectParallelSum(long n) {
+	Accumulator accumulator = new Accumulator();
+	LongStream.rangeClosed(1, n).parallel().forEach(accumulator::add);
+	return accumulator.total;
+}
+
+위의 함수를 실행해보자.
+
+System.out.println("SideEffect parallel sum done in: " +
+	measurePerf(ParallelStream::sideEffectParallelSum, 10_000_000L) + " msecs" );
+
+올바른 결과값이 나오지 않는다. 병렬 스트림을 사용했을 때 상태 공유에 따른 부작용을 피해야 한다.
+
+
+병렬 스트림 효과적으로 사용하기
+
+양을 기준으로 병렬 스트림 사용을 결정하는 것은 적절하지 않다. 기기나 환경이 바뀌면 양 역시도 기준이 바뀔 수 있다. 그래도 어떤 상황에서 병렬 스트림을 사용할 것인지 약간의 수량적 힌트를 정하는 것이 도움이 되기도 한다.
+
+- 확신이 서지 않으면 직접 측정하라. 병렬 스트림의 수행과정은 투명하지 않으니 적절한 벤치마크로 직접 성능을 측정하자.
+- 박싱을 주의하라. 자동 박싱과 언박싱은 성능을 크게 저하시킬 수 있는 요소이다. 기본형 특화 스트림을 사용하자.
+- 순차 스트림보다 병렬 스트림에서 성능이 떨어지는 연산이 있다. 특히 limit나 findFirst처럼 요소의 순서에 의존하는 연산이 그렇다.
+- 스트림에서 수행하는 전체 파이프라인 연산비용을 고려하자. 처리해야할 요소수가 N이고 하나의 요소를 처리하는데 드는 비용이 Q라면 전체 스트림 파이프라인 처리 비용을 N*Q라고 예상할 수 있다. Q가 높아진다는 것은 병렬 스트림으로 성능을 개선할 가능성이 있음을 의미한다.
+- 소량의 데이터에서는 병렬 스트림이 도움되지 않는다. 이점보다 오버헤드가 더 크다.
+- 스트림을 구성하는 자료구조가 적절한지 확인하라. 예를 들어 ArrayList를 LinkedList보다 효율적으로 분할할 수 있다. LinkedList를 분할하려면 모든 요소를 탐색해야 한다.
+- 스트림의 특성과 파이프라인의 중간 연산이 스트림의 특성을 어떻게 바꾸는지에 따라 분해 과정의 성능이 달라질 수 있다. 
+- 최종 연산의 병합 과정(예를 들면 Collector의 combiner 메서드) 비용을 살펴보라. 병합 과정의 비용이 비싸다면 병렬 스트림으로 얻은 성능의 이익이 서브스트림의 부분결과를 합치는 과정에서 상쇄될 수 있다.
+
+스트림 소스의 분해성
+소스
+ArrayList - 훌륭함		//array구조라 좋음.
+LinkedList - 나쁨			//객체가 연결된 구조라 나쁨.
+IntStream.range - 훌륭함		//내부로직이 알아서 분배해주는 듯
+Stream.iterate - 나쁨		//값을 하나씩 생성시키기 때문에 순차적이라 나쁨. 
+HashSet - 좋음			//해쉬는 실질적으로 array를 사용하므로 좋을 듯.
+TreeSet - 좋음			//왜 좋은지 모르겠음
+
+마지막으로 병렬 스트림이 수행되는 내부 인프라구조도 살펴봐야 함. 
+자바7에서 추가된 포크/조인 프레임워크로 병렬 스트림이 처리된다. 포크/조인 프레임워크를 살펴보자.
+
+
+포크/조인 프레임워크
+
+포크/조인 프레임워크는 병렬화할 수 있는 작업을 재귀적으로 작은 작업으로 분할한 다음에 서브태스크 각각의 결과를 합쳐서 전체 결과를 만들도록 설계되어있다.
+포크/조인 프레임워크에서는 서브태스크를 스레드 풀의 작업자 스레드에 분산할당하는 ExecutorService인터페이스를 구현한다.
