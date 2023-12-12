@@ -1714,3 +1714,300 @@ TreeSet - 좋음			//왜 좋은지 모르겠음
 
 포크/조인 프레임워크는 병렬화할 수 있는 작업을 재귀적으로 작은 작업으로 분할한 다음에 서브태스크 각각의 결과를 합쳐서 전체 결과를 만들도록 설계되어있다.
 포크/조인 프레임워크에서는 서브태스크를 스레드 풀의 작업자 스레드에 분산할당하는 ExecutorService인터페이스를 구현한다.
+
+RecursiveTask 활용
+스레드풀을 이용하려면 RecursiveTask<R>의 서브클래스를 만들어야 한다. 
+여기서 R은 병렬화된 태스크가 생성하는 결과 형식 또는 결과값이 없을 때(결과가 없더라도 다른 비지역 구조를 바꿀 수 있다)는 RecursiveAction 형식이다. 
+RecursiveTask를 정의하려면 추상 메서드 compute를 구현해야 한다.
+
+protected abstract R compute();
+
+compute 메서드는 태스크를 서브태스크로 분할하는 로직과 더 이상 분할할 수 없을 때 개별 서브태스크의 결과를 생산할 알고리즘을 정의한다. 따라서 다음과 같은 의사코드 형식을 유지한다.
+
+if (태스크가 충분히 작거나 더 이상 분할할 수 없으면) {
+	순차적으로 태스크 계산
+} else {
+	태스크를 두 서브태스크로 분할
+	태스크가 다시 서브태스크로 분할되도록 이 메서드를 재귀적으로 호출함
+	모든 서브태스크의 연산이 완료될 때까지 기다림
+	각 서브태스크의 결과를 합침
+}
+
+태스크를 더 분할할 것인지 말 것인지 정해진 기준은 없지만 몇 가지 경험적으로 얻은 좋은 데이터가 있다.
+
+분할 후 정복 알고리즘의 병렬화 버전이다.
+
+포크/조인 프레임워크를 이용해서 병렬 합계 수행
+public class ForkJoinSumCalculator extends java.util.concurrent.RecursiveTask<Long> {
+	private final long[] numbers;  //더할 숫자 배열
+	private final int start;       //서브태스크에서 처리할 배열의 초기 위치와 최종위치
+	private final int end;
+	public static final long THRESHOLD = 10_000; //분할 임계값
+	
+	public ForkJoinCalculator(long[] numbers){  //메인 태스크 생성시 공개 생성자
+		this(numbers, 0, numbers.length);
+	}
+	private ForkJoinCalculator(long[] numbers, int start, int end) { //비공개 생성자
+		this.numbers = numbers;		//서브태스크를 재귀적으로 만들 때 사용
+		this.start = start;
+		this.end = end;
+	}
+
+	@Override
+	protected Long compute() {
+		int length = end - start;
+		if (length <= THRESHOLD) {
+			return computeSequentially();
+		}
+		ForkJoinSumCalculator leftTask = 
+			new ForkJoinSumCalculator(numbers, start, start + length/2);
+		leftTask.fork();
+		ForkJoinSumCalculator rightTask = //다른 스레드로 생성한 태스크 비동기실행
+			new ForkJoinSumCalculator(numbers, start + length/2, end);
+		Long rightResult = rightTask.compute();	//두번째 서브태스크를 동기실행
+		Long leftResult = leftTask.join();	//첫째 서브태스크결과 확인 또는 대기
+		return leftResult + rightResult;	//분할된 서브태스크의 조합을 결과로
+	}
+
+	private long computeSequentially() {		//분할 불가능하면 계산하는 로직
+		long sum = 0;
+		for (int i = start; i < end; i++){
+			sum += numbers[i];
+		}
+		return sum;
+	}
+}
+
+
+ForkJoinSumCalculator의 생성자로 원하는 수의 배열을 넘겨줄 수 있다.
+
+public static long forkJoinSum(long n) {
+	long[] numbers = LongStream.rangeClosed(1, n).toArray();
+	ForkJoinTask<Long> task = new ForkJoinSumCalculator(numbers);
+	return new ForkJoinPool().invoke(task);
+}
+
+LongStream으로 n까지의 자연수를 포함하는 배열을 생성했다. 
+생성된 배열을 ForkJoinSumCalculator의 생성자로 전달해서 ForkJoinTask를 만들었다.
+마지막으로 생성한 태스크를 새로운 ForkJoinPool의 invoke메서드로 전달했다.
+
+일반적으로 애플리케이션에서 둘 이상의 ForkJoinPool을 사용하지 않는다.
+소프트웨어의 필요한 곳에서 언제든 가져다 쓸 수 있도록 ForkJoinPool을 한 번만 인스터스화해서 정적필드에 싱글턴으로 저장한다. ForkJoinPool을 만들면서 인수가 없는 디폴트 생성자를 이용했는데, 이는 JVM에서 이용할 수 있는 모든 프로세서가 자유롭게 풀에 접근할 수 있음을 의미한다.
+더 정확힌 Runtime.availableProcessors의 반환값으로 풀에 사용할 스레드 수를 결정한다.
+'availableProcessors' 사용할 수 있는 프로세서과 달리 실제 프로세서 외에 하이퍼스레딩과 관련된 가상 프로세서도 개수에 포함한다.
+
+ForkJoinSumCalculator 실행
+
+계산기객체를 ForkJoinPool로 전달하면 풀의 스레드가 compute매서드를 실행하면서 작업을 수행한다. 
+compute 메서드는 병렬로 실행할 만큼 태스크가 작아졌는지 확인 후 배열을 추가로 분할하거나 실행한다.
+이 과정이 재귀로 발생한다. 
+각 서브태스크는 순차적으로 처리되며 포킹 프로세스로 만들어진 이진트리의 태스크를 루트에서 역순으로 방문한다.
+
+성능확인
+System.out.println("ForkJoin sum done in: " + measureSumPerf(
+	ForkJoinSumCalculator::forkJoinSum, 10_000_000) + " msecs" );
+
+병렬 스트림보다 성능이 나빠졌다. 하지만 이는 ForkJoinSumCalculator 태스크에서 사용할 수 있도록 전체 스트림을 long[] 으로 변환했기 때문이다.
+?먼 말이여?
+
+
+포크/조인 프레임워크를 제대로 사용하는 방법
+쉽게 사용할 수 있지만 주의해서 사용하자.
+- join 메서드를 태스크에 호출하면 태스크가 생산하는 결과가 준비될 때까지 호출자를 블록시킨다. 따라서 두 서브태스크가 모두 시작된 다음에 join을 호출해야 한다.
+그렇지 않으면 각각의 서브태스크가 다른 태스크가 끝나길 기다리는 일이 발생한다.
+- ResursiveTask내에서는 ForkJoinPool의 invoke메서드를 사용하지 말아야 한다.
+대신 compute나 fork 메서드를 직접 호출할 수 있다. 순차코드에서 병렬 계산을 시작할 때만 invoke를 사용한다.
+- 서브태스크에 fork 메서드를 호출해서 ForkJoinPool의 일정을 조절할 수 있다. 왼쪽 작업과 오른쪽 작업 모두에 fork 메서드를 호출하는 것이 자연스러울 것 같지만 한쪽 작업에는 fork를 호출하는 것보다는 compute를 호출하는 것이 효율적이다. 그러면 두 서브태스크의 한 태스크에는 같은 스레드를 재사용할 수 있으므로 풀에서 불필요한 태스크를 할당하는 오버헤드를 피할 수 있다.
+??먼말이지 ?위에서 left만 fork하길래 이상하다 생각했는데 이런 소리였군?
+- 포크/조인 프레임워크를 이용하는 병렬 계산은 디버깅이 어렵다. 포크/조인 프레임워크에서는 fork라 불리는 다른 스레드에서 compute를 호출하므로 스택트레이스가 도움이 되지 않는다.
+- 병렬 스트림에서 살펴본 것처럼 멀티코어에 포크/조인 프레임워크를 사용하는 것이 순차 처리보다 무조건 빠른 것은 아니다. 다른 자바 코드와 마찬가지로 JIT 컴파일러에 의해 최적화되려면 몇 차례의 '준비과정' 또는 실행과정을 거쳐야 한다. 따라서 성능 측정시 하니스에서 그랬던 것처럼 여러 번 프로그램을 실행한 결과를 측정해야 한다. 또한 컴파일러 최적화는 병렬 버전보다는 순차버전에 집중될 수 있다는 사실도 기억하자.(예를 들어 순차버전에서는 죽은 코드를 분석해서 사용되지 않는 계산은 아예 삭제하는 등의 최적화를 달성하기 쉽다)
+
+포크/조인 분할 전략에서는 주어진 서브태스크를 더 분할할 것인지 결정할 기준을 정해야 한다.
+그 분할 조건을 살펴보자.
+
+
+작업 훔치기
+ForkJoinSumCalculator 예제에선 덧셈을 수행할 숫자가 만 개 이하면 서브태스크 분할을 중단했다.
+기준값을 바꿔가면서 실험해보는 방법 외에는 좋은 기준을 찾을 뾰족한 방법이 없다.
+
+코어 개수와 관계없이 적절한 크기로 분할된 많은 태스크를 포킹하는 것이 바람직하다.
+이론적으로는 코어 개수만큼 병렬화된 태스크로 작업부하를 분할하면 모든 CPU코어에서 태스크를 실행할 것이고 크기가 같은 각각의 태스크는 같은 시간에 종료될 것이라 생각할 수 있다.
+하지만 복잡한 시나리오의 경우 각각 서브태스크의 작업완료 시간이 크게 달라질 수 있다.
+포크/조인 프레임워크에서는 작업 훔치기라는 기법으로 이 문제를 해결한다.
+작업 훔치기 기법에서는 ForkJoinPool의 모든 스레드를 거의 공정하게 분할한다. 
+각각의 스레드는 자신에게 할당된 태스크를 포함하는 이중 연결 리스트를 참조하면서 작업이 끝날 때마다 큐의 헤드에서 다른 태스크를 가져와서 작업을 처리한다. 
+이때 한 스레드는 다른 스레드보다 자신에게 할당된 태스크를 더 빨리 처리할 수 있다.
+이때 할일이 없어진 스레드는 유휴상태로 바뀌는 것이 아니라 다른 스레드 큐의 꼬리에서 작업을 훔쳐온다.
+??어떻게 훔쳐오는 거지? 알고리즘 내용이 없네, 작업훔치기 알고리즘을 확인해 볼 것.
+모든 태스크가 작업을 끝낼 때까지, 즉 모든 큐가 빌때까지 이 과정을 반복한다. 따라서 태스크의 크기를 작게 나누어야 작업자 스레드 간의 작업부하를 비슷한 수준으로 유지할 수 있다.
+
+분할로직을 개발하지 않고도 병렬 스트림을 이용할 수 있다. 스트림을 자동으로 분할해주는 기능이 있다.
+
+
+Spliterator 인터페이스
+자바8의 새로운 인터페이스, '분할할 수 있는 반복자'라는 의미
+Iterator처럼 Spliterator는 소스의 요소 탐색 기능을 제공한다는 점은 같지만, Spliterator는 병렬 작업에 특화되어 있다.
+커스텀 Spliterator를 직접 구현해서 어떻게 동작하는지 이해해보자.
+자바8은 컬렉션 프레임워크에 포함된 모든 자료구조에 사용할 수 있는 디폴트 Spliterator 구현을 제공.
+컬렉션은 spliterator라는 메서드를 제공하는 Spliterator인터페이스를 구현한다.
+
+public interface Spliterator<T> {
+	boolean tryAdvance(Consumer<? super T> action);
+	Spliterator<T> trySplit();
+	long estimateSize();
+	int characteristics();
+}
+
+T는 spliterator에서 탐색하는 요소의 형식을 가리킨다. 
+tryAdvance메서드는 Spliterator의 요소를 하나씩 순차적으로 소비하면서 탐색해야 할 요소가 남아있으면 참을 반환한다.(즉, 일반적인 Iterator 동작과 같다) 반면 trySplit 메서드는 Splitertor의 일부 요소(자신이 반환한 요소)를 분할해서 두 번째 Spliterator를 생성하는 메서드다.
+Spliterator에서는 estimateSize 메서드로 탐색해야 할 요소 수 정보를 제공할 수 있다. 특히 탐색해야 할 요소 수가 정확하진 않더라도 제공된 값을 이용해서 더 쉽고 공평하게 SPliterator를 분할할 수 있다.
+
+분할과정
+
+1단계에서 첫 번째 Spliterator에 trySplit을 호출하면 두 번째 Spliterator가 생성된다.
+2단계에서 두 개의 Spliterator에서 trySplit을 다시 호출하면 네 개의 Spliterator가 생성된다.
+이처럼 trySPlit의 결과가 null이 될 때까지 반복한다.
+4단계에서 Spliterator에 호출한 모든 trySPlit의 결과가 null이면 재귀 분할 과정이 종료된다.
+이 분할 과정은 characteristics 메서드로 정의하는 SPliterator의 특성에 영향을 받는다.
+
+
+Spliterator 특성
+
+characteristics 메서드는 Spliterator 자체의 특성 집합을 포함하는 int를 반환.
+Spliterator를 이용하는 프로그램은 이들 특성을 참고해서 SPliterator를 더 잘 제어하고 최적화할 수 있다.(안타깝게도 일부 특성은 컬렉터와 개념상 비슷함에도 다른 방식으로 정의되었다.)
+
+ORDERED - 리스트처럼 요소에 정해진 순서가 있으므로 Spliterator는 요소를 탐색하고 분할할 때 이 순서에 유의해야 한다.
+DISTINCT - x, y두 요소를 방문했을 때, x.equals(y)는 항상 false를 반환.
+SORTED - 탐색된 요소는 미리 정의된 정렬 순서를 따름.
+SIZED - 크기가 알려진 소스(예를 들어 Set)로 Spliterator를 생성했으므로 estimatedSize()는 정확한 값을 반환.
+NON-NULL - 탐색하는 모든 요소는 null이 아님.
+IMMUTABLE - 이 Spliterator의 소스는 불변이다. 즉, 요소를 탐색하는 동안 요소를 추가하거나, 삭제하거나, 고칠 수 없다.
+CONCURRENT - 동기화 없이 Spliterator의 소스를 여러 스레드에서 동시에 고칠 수 있다.
+SUBSIZED - 이 Spliterator 그리고 분할되는 모든 Spliterator는 SIZED 특성을 갖는다.
+
+
+커스텀 Spliterator 구현하기
+
+문자열의 단어 수를 계산하는 메서드 구현
+- 반복 버전
+public int countWordsIteratively(String s) {
+	int counter = 0;
+	boolean lastSpace = true;
+	for (char c : s.toCharArray()) {	//문자열의 모든 문자 탐색
+		if(Character.isWhitespace(c)) {	//공백이면 lastSpace = true, 연속공백 무효
+			lastSpace = true;	
+		} else {
+			if (lastSpace) counter++;  //공백이 아니고 lastSpace가 true면 +1
+			lastSpace = false;	   //공백이 아니면 일단 lastSpace false
+		}
+	}
+	return counter;		//공백 개수(단어 수) 반환
+}
+
+
+반복형 대신 함수형을 이용하면 직접 스레드를 동기화하지 않고도 병렬 스트림으로 작업을 병렬화할 수 있다.
+
+
+함수형으로 단어 수 세는 메서드 재구현
+
+우선 String을 스트림으로 변환.
+안타깝게도 스트림은 int, long, double 기본형만 제공하므로 Stream<Character>를 사용해야 한다.ㅈㄷ
+
+Stream<Character> stream = IntStream.range(0, SENTENCE.length())
+					.mapToObj(SENTENCE::charAt);
+
+스트림에 리듀싱 연산을 실행하면서 단어 수를 계산할 수 있다.
+이때 지금까지 발견한 단어 수를 계산하는 int변수, 마지막 문자가 공백인지 확인하는 Boolean 변수 두 가지가 필요하다.
+자바에는 튜플(래퍼 객체 없이 다형 요소의 정렬 리스트를 표현할 수 있는 구조체)이 없음.
+따라서 이들 변수 상태를 캡슐화하는 새로운 클래스 WordCounter를 만들어야 함.
+
+class WordCounter {
+	private final int counter;
+	private final boolean lastSpace;
+	public WordCounter(int counter, boolean lastSpace) {
+		this.counter = counter;
+		this.lastSpace = space;
+	}
+	public WordCounter accumulate(Character c) {
+		if(Character.isWhitespace(c)){
+			return lastSpace? this : new WordCounter(counter, true);
+		} else {
+			return lastSpace ? new WordCounter(counter + 1, false), this;
+		}
+	}
+	public WordCounter combine(WordCounter wordCounter) {
+		return new WordCounter(counter + wordCounter.counter,
+						 wordCounter.lastSpace);
+	}
+	public int getCounter() {
+		return counter;
+	}
+}
+
+
+accumulate 메서드는 WordCOunter의 상태를 어떻게 바꿀 것인지, 또는 엄밀히 WordCounter는 (속성을 바꿀 수 없는) 불변 클래스이므로 새로운 WordCounter클래스를 어떤 상태로 생성할 것인지 정의한다.
+스트림을 탐색하면서 새로운 문자를 찾을 때 마다 accumulate메서드를 호출.
+두 번째 메서드 combine은 문자열 서브 스트림을 처리한 WordCounter의 결과를 합침.
+즉, combine은 WordCounter의 내부 counter값을 서로 합침.
+
+이제 다음 코드처럼 문자 스트림의 리듀싱 연산을 직관적으로 구현할 수 있다.
+
+private int countWords(Stream<Character> stream) {
+	WordCounter wordCounter = stream.reduce(new WordCounter(0, true), //초기값
+						WordCounter::accumulate,  //누적
+						WordCounter::combine);    //결합
+	return wordCounter.getCounter();
+}
+
+이것으로 순차스트림 문자 수 찾기가 완성됐다.
+이것을 병렬 수행으로 바꿔보자.
+
+WordCounter 병렬로 수행하기
+
+System.out.println("Found " + countWords(stream.parallel()) + " words");
+
+아마 원하는 결과가 나오지 않을 것이다.
+
+무엇이 잘못됐을까? 원래 문자열을 임의의 위치에서 둘로 나누다보니 예상치 못하게 하나의 단어를 둘로 계산하는 상황이 발생할 수 있다.
+어떻게 해결할 수 있을까? 문자열을 임의의 위치가 아닌 단어가 끝나는 위치에서만 분할하자.
+그러려면 단어 끝에서 문자열을 분할하는 문자 Spliterator가 필요하다.
+
+문자 Spliterator를 구현한 다음에 병렬 스트림으로 전달하는 코드
+
+class WordCounterSpliterator implements Spliterator<Character> { //공백기준 분리자
+	private final String string;		//분할할 문자
+	private int currentChar = 0;		//현재 위치
+	public WordCounterSpliterator(String string) {
+		this.string = string;
+	}
+	@Override
+	public boolean tryAdvance(Consumer<? super Character> action) {  //
+		action.accept(string.charAt(currentChar++));
+		return currentChar < string.length();
+	}
+	@Override
+	public Spliterator<Character> trySplit() {	//분리
+		int currentSize = string.length() - currentChar; //size는 문자길이 - 위치
+		if (currentSize < 10 ) {			 //size가 10보다 작으면
+			return null;				 //분할 안함. null
+		}
+		for (int splitPos = currentSize / 2 + currentChar;
+			splitPos < string.length(); splitPos++) {
+			if (Character.isWhitespace(string.charAt(splitPos))) {
+				Spliterator<Character> spliterator = 
+					new WordCounterSpliterator(string.substring 							(currentChar, splitPos));
+					currentChar = splitPos;
+					return spliterator;
+			}
+		}
+		return null;
+	}
+	@Override
+	public long estimateSize() {
+		return string.length() - currentChar;
+	}
+	@Override
+	public int charateristics() {
+		return ORDERED + SIZED + SUBSIZED + NON-NULL + IMMUTABLE;
+	}
+}
