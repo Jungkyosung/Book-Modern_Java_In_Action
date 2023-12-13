@@ -2011,3 +2011,34 @@ class WordCounterSpliterator implements Spliterator<Character> { //공백기준 
 		return ORDERED + SIZED + SUBSIZED + NON-NULL + IMMUTABLE;
 	}
 }
+
+분석 대상 문자열로 Spliterator를 생성 -> 현재 탐색 중인 문자를 가리키는 인덱스를 이용해서 모든 문자 반복 탐색.
+- tryAdvance메서드는 문자열에서 현재 인덱스에 해당하는 문자를 Consumer에 제공한 다음 인덱스 증가.
+인수로 전달된 Consumer는 스트림을 탐색하면서 적용해야 하는 함수 집합이 작업을 처리할 수 있도록 소비한 문자를 전달하는 자바 내부 클래스다.
+예제에선 스트림을 탐색하면서 하나의 리듀싱 함수, 즉 WordCounter의 accumulate메서드만 적용한다.
+tryAdvance메서드는 새로운 커서 위치가 전체 문자열 길이보다 작으면 참을 반환. 이는 반복 탐색해야 할 문자가 남았음을 의미.
+- trySplit은 반복될 자료구조를 분할하는 로직을 포함. Spliterator에서 가장 중요한 메서드.
+분할 동작을 중단할 임계점을 설정해야 한다. 여기선 아주 작은 한계값(10개문자)을 사용했지만 실제는 너무 많은 분할을 하지않도록 더 높게 설정해야 함. 분할 과정에서 남은 문자 수가 한계값 이하면 null을 반환. 즉, 분할 중지. 
+반대로 분할이 필요한 상황에서는 파싱해야할 문자열 청크의 중간 위치를 기준으로 분할. 이때 단어 중간을 분할하지 않도록 빈 문자가 나올때까지 분할 위치를 이동. 새로 만든 Spliterator는 현재 위치(currentChar)부터 분할된 위치까지의 문자를 탐색.
+- 탐색해야 할 요소의 개수(estimatedSize)는 Spliterator가 파싱할 문자열 전체 길이(string.length())와 현재 반복중인 위치(currentChar)의 차다.
+- 마지막으로 characteristic메서드는 프레임워크에 SPliterator가 ORDERED(문자열), NONNULL(문자열에는 null 문자가 존재하지 않음), IMMUTABLE(문자열 자체가 불편 클래스이므로 문자열을 파싱하면서 속성이 추가되지 않음) 등의 특성임을 알려준다.
+
+
+WordCounterSpliterator 활용
+
+WorkCounterSpliterator를 병렬 스트림에 사용하자.
+
+Spliterator<Character> spliterator = new WordCounterSPliterator(SENTENCE);
+Stream<Character> stream = StreamSupport.steam(splitarator, ture):
+
+StreamSupport.stream 팰토리 메서드로 전달한 두 번째 불리언 인수는 병렬 스트림 생성여부를 지시.
+System.out.println("Found " + countWords(stream) + "words");
+
+이제 정확한 결과가 출력된다.
+
+Spliterator는 첫 번째 탐색 시점, 첫 번째 분할 시점, 또는 첫 번째 예상 크기 요청 시점에 요소의 소스를 바인딩 할 수 있다.(바인딩?) 이와 같은 동작을 늦은 바인딩 Spliterator라고 부른다.
+
+
+
+
+
