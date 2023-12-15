@@ -454,3 +454,107 @@ public static Optional<Integer> stringToInt(String s) {
 기본형 Optional을 사용하지 말아야 하는 이유
 
 스트림처럼 Optional도 기본형으로 특화된 OptionalInt, OptionalLong, OptionalDouble 등의 클래스를 제공한다. 
+예를 들어 Optional<Integer> 대신 OptionalInt를 반환할 수 있다.
+Stream은 기본형 특화(ex. StreamInt)로 성능향상을 했지만, Optional은 요소수가 0~1이기 때문에 기본 특화 클래스로 성능 개선할 수 없다.
+
+기본형 특화 Optional은 map, flatMap, filter 등을 지원하지 않으므로 기본형 특화 Optional을 사용할 것을 권장하지 않는다. 
+게다가 스트림과 마찬가지로 기본형 특화 Optional로 생성한 결과는 다른 일반 Optional과 혼용할 수 없다.
+예를 들어 OptionalInt를 반환한다면 이를 다른 Optional의 flatMap에 메서드 참조로 전달할 수 없다.
+??그럼 굳이 왜 만들어 둠??
+
+
+응용
+
+Optional 클래스의 메서드를 실제 업무에서 어떻게 활용할 수 있을까
+예를 들어 프로그램의 설정 인수로 Properties를 전달한다고 가정하자.
+그리고 다음과 같은 Properties로 우리가 만든 코드를 테스트할 것이다.
+
+Properties props = new Properties();
+props.setProperty("a", "5");
+props.setProperty("b", "true");
+props.setProperty("c", "-3");
+
+이제 프로그램에서는 Properties를 읽어서 값을 초 단위의 지속시간으로 해석한다.
+다음과 같은 메서드 시그니처로 지속 시간을 읽을 것이다.
+
+public int readDuration(Properties props, String name)
+
+지속 시간은 양수여야 하므로 문자열이 양의 정수를 가리키면 해당 정수를 반환하지만 그 외에는 0을 반환한다.
+이를 다음처럼 JUnit 어설션으로 구현할 수 있다.
+assertEquals(5, readDuration(param, "a"));	//assertEquals(a, b) a랑b가 같은지 확인 
+assertEquals(0, readDuration(param, "b"));
+assertEquals(0, readDuration(param, "c"));
+assertEquals(0, readDuration(param, "d"));
+
+이들 어설션은 다음과 같은 의미를 갖는다.
+프로퍼티 'a'는 양수로 변환할 수 있는 문자열을 포함하므로 readDuration메서드는 5를 반환한다.
+'b'는 변환 불가라 0을 반환. 'c'는 음수 문자열이므로 0을 반환.
+'d'는 해당 프로퍼티가 없으므로 0을 반환.
+
+
+public int readDuration(Properties props, String name) {
+	String value = props.getProperty(name);
+	if (value != null) {
+		try {
+			int i = Integer.parseInt(value);
+			if ( i > 0 ) {
+			return i;
+			}
+		} catch (NumberFormatException nfe) { }
+	}
+	return 0;	//value가 null이거나 int로 변환한게 0보다 작거나 예외가 발생하면 0 반환
+}
+
+if랑 try/catch를 사용해서 구현 코드가 복잡해졌다.
+위의 코드를 Optional을 사용해서 개선해보자
+
+
+요청한 프로퍼티가 존재하지 않을 때 Properties.getProperty(String) 메서드는 null을 반환하므로 ofNullable 팩토리 메서드를 이용해 Optional을 반환하도록 바꿀 수 있다.
+그리고 flatMap메서드에 앞서 만든 stringToInt메서드 참조를 전달해서 Optional<String>을 Optional<Integer>로 바꿀 수 있다. 마지막으로 음수를 필터링해서 제거한다.
+이들 중 하나라도 빈 Optional을 반환하면 orElse에 의해 0을 반환한다.
+
+Optional.ofNullable(props.getProperty(name))
+	.flatMap(OptionalUtility::stringToInt)	//Optional<String> -> Optional<Integer>
+	.filter(i -> i > 0)	//알아서 Integer를 비교하나? get없이?
+	.orElse(0);
+
+
+Optional과 스트림에서 사용한 방식은 여러 연산이 연결되는 데이터베이스 질의문과 비슷하다.
+
+
+
+새로운 날짜와 시간 API
+
+자바 API는 복잡한 어플리케이션을 만드는 데 필요한 여러 유용한 컴포넌트를 제공한다.
+하지만 자바 API가 완벽한 것은 아니다.
+대부분의 자바 개발자가 날짜와 시간 관련 기능에 만족하지 못했다.
+자바8은 새로운 날짜와 시간 API를 제공한다.
+
+자바 1.0에선 java.util.Date클래스 하나로 날짜와 시간 관련 기능을 제공했다.
+날짜를 의미하는 Date라는 클래스의 이름과 달리 Date클래스는 특정 시점을 날짜가 아닌 밀리초 단위로 표현한다.
+게다가 1900년을 기준으로 하는 오프셋, 0에서 시작하는 달 인덱스 등 모호한 설계로 유용성이 떨어졌다.
+
+다음은 자바9의 릴리스 날짜인 2017년 9월 21일을  Date인스턴스를 만드는 코드다.
+Date date = new Date(117, 8, 21);
+
+다음은 날짜 출력 결과다.
+Thu Sep 21 00:00:00 CET 2017
+
+결과가 직관적이지 않다. 또한 Date클래스의 toString으로는 반환되는 문자열을 추가로 활용하기가 어렵다.
+출력 결과에서 알 수 있듯이 Date는 JVM 기본시간대인 CET, 즉 중앙유럽시간대를 사용했다. 그렇다고 Date클래스가 자체적으로 시간대 정보를 알고 있는 것도 아니다.
+
+자바 1.1에서는 Date 클래스의 여러 메서드를 사장 시키고 java.util.Calendar라는 클래스를 대안으로 제공했다. 1900년도에 시작하는 오프셋은 없앴지만, 여전히 달의 인덱스는 0부터 시작했다.
+Date와 Calendar 두 가지 클래스가 생겨서 어느 클래스를 사용할지 혼란이 생겼다.
+게다가 DateFormat 같은 일부 기능은 Date클래스에서만 작동했다.
+
+DateFormat도 문제가 있다. 예를 들어 DateFormat은 스레드에 안전하지 않다. 즉, 두 스레드가 동시에 하나의 포매터로 날짜를 파싱할 때 예기치 못한 결과가 일어날 수 있다.
+
+마지막으로 Date와 Calendar는 모두 가변 클래스다.
+2017년 9월 21일을 2017년 10월 25일로 바꾸면 어떤 문제가 생길까? 가변클래스 설계 때문에 유지보수가 어려워진다.
+
+부실한 날짜와 시간 라이브러리 때문에 많은 개발자는 Joda-Time 같은 서드파티 날짜 시간 라이브러리를 사용했다.
+결국 오라클은 자바8에서 Joda-Time의 많은 기능을 java.time 패키지로 추가했다.
+
+
+
+
