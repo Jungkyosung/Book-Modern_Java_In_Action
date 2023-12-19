@@ -860,17 +860,132 @@ LocalDate date2 = LocalDate.parse("2014-03-18", DateTimeFormatter.ISO_LOCAL_DATE
 
 DateTimeFormatter formatter = DateTimeFormatter.ofPattern("dd/MM/yyyy");
 LocalDate date1 = LocalDate.of(2014, 3, 18);
-String formatterDate = date1.format(formatter);
+String formatterDate = date1.format(formatter);  // 18/03/2014
 LocalDate date2 = LocalDate.parse(formatterDate, formatter);
 
 
+LocalDate의 format 메서드는 요청 형식의 패턴에 해당하는 문자열을 생성한다. 
+정적 parse메서드는 같은 포매터를 적용해서 생성된 문자열을 파싱함으로써 다시 날짜를 생성한다.
+(parse를 통해 단계별로 of -> format을 사용하지 않고 바로 인자에 (날짜, 포맷형식)을 넣어서 날짜로 변환 가능)
+
+ofPattern메서드도 Locale로 포매터를 만들 수 있도록 오버로드된 메서드를 제공한다.
+지역화된 DateTimeFormatter 만들기
+DateTimeFormatter italianFormatter = DateTimeFormatter.ofPattern("d. MMMM yyyy", Local.ITALIAN);
+LocalDate date1 = LocalDate.of(2014, 3, 18);
+String formattedDate = date.format(italianFormatter); // 18. marzo 2014
+LocalDate date2 = LocalDate.parse(formattedDate, italianFormatter);
 
 
 
+DateTimeFormatterBuilder 클래스로 복합적인 포매터를 정의해서 좀 더 세부적으로 포매터를 제어할 수 있다. 
+- 대소문자 구분 파싱
+- 관대한 규칙을 적용하는 파싱(정해진 형식과 정확하게 일치하지 않는 입력을 해석할 수 있도록 체험적 방식의 파서 사용)
+- 패딩
+- 포매터의 선택사항
+- 기타 등등
+
+위의 이탈리안 포매터를 빌더를 사용하여 만들기
+DateTimeFormmater italianFormatter = new DateTimeFormatterBuilder()
+	.appendText(ChronoField.DAY_OF_MONTH)
+	.appendLiteral(". ")
+	.appendText(ChronoField.MONTH_OF_YEAR)
+	.appendLiteral(" ")
+	.appendText(ChronoField.YEAR)
+	.appendCaseInsensitive()
+	.toFormatter(Local.ITALIAN);
 
 
 
+다양한 시간대와 캘린더 활용 방법
 
+지금까지 살펴본 모든 클래스에는 시간대와 관련한 정보가 없었다. 
+새로운 날짜와 시간 API의 큰 편리함 중 하나는 시간대를 간단하게 처리할 수 있다는 점이다.
+기존의 java.util.TimeZone을 대체할 수 있는 java.time.ZoneId클래스가 새롭게 등장했다.
+새로운 클래스를 이용하면 서머타임(DST) 같은 복잡한 사항이 자동으로 처리된다.
+날짜와 시간API에서 제공하는 다른 클래스와 마찬가지로 ZoneId는 불변 클래스다.
+(불변인 이유가 함수형에서 사이드이펙트를 줄이도록 강제하기 때문이였나?)
+
+
+시간대 사용하기
+
+표준 시간이 같은 지역을 묶어서 시간대 규칙 집합을 정의한다. 
+ZoneRules 클래스에는 약 40개 정도의 시간대가 있다.
+ZoneId의 getRules()를 이용해서 해당 시간대의 규정을 획득할 수 있다.
+
+ZoneId romeZone = ZoneId.of("Europe/Rome");
+
+지역 ID = '{지역}/{도시}' 형식으로 지정.
+IANA Time Zone Database에서 제공하는 지역 집합 정보를 사용
+(https://www.iana.org/time-zones 참고)
+
+ZoneId의 toZoneId로 기존의 TimeZone 객체를 ZoneId로 변환 가능(과거 호환)
+
+ZoneId zoneId = TimeZone.getDefault().toZoneId();
+
+다음 코드에서 보여주는 것처럼 ZoneId 객체를 얻은 다음에는 LocalDate, LocalDateTime, Instant를 이용해서 ZonedDateTime 인스턴스로 변환 가능.
+ZonedDateTime은 지정시간대의 상대적 시점 표현.
+
+LocalDate date = LocalDate.of(2014, Month.MARCH, 18);
+ZoneDateTime zdt1 = date.atStartOfDay(romeZone);	//date(날짜)에 rome 시간 적용
+
+LocalDateTime dateTime = LocalDateTime.of(2014, Month.MARCH, 18, 13, 45);
+ZonedDateTime zdt2 = dateTime.atZone(romeZone);   //dateTime(시간날짜)에 rome 시간 적용
+
+Instant instant = Instant.now();		//기계시간(현재, 서버의 시간 기준(GMT 아님))
+ZonedDateTime zdt3 = instant.atZone(romeZone);
+
+
+2014-05-14T15:33:05.941+01:00[Europu/London]   //GMT + 1하면 런던 시각.
+|LocalDate|  LocalTime |     ZoneId        |
+|     LocalDateTime       |
+|             ZonedDateTime                |
+
+
+
+ZoneId를 이용해서 LocalDateTime을 instant로 바꾸기
+
+Instant instant = Instant.now();
+LocalDateTime timeFromInstant = LocalDateTime.ofInstant(instant, romeZone);
+
+기존의 Date 클래스를 처리하는 코드를 사용해야 하는 상황이 있을 수 있으므로 Instant로 작업하는 것이 유리하다.
+(이렇게 사용하면 위처럼 +00:00 시간[지역] 으로 표시되는 게 아니라 +시간이 반영된 시간으로 출력할 수가 있음. LocalDateTime.now()를 하면 어차피 서버컴퓨터시간을 기준으로 측정하기 때문에 문제는 없으나, 타지역 시간을 계산하기 귀찮다.)
+폐기된 API와 새 날짜와 시간 API 간의 동작에 도움이 되는 toInstant(), 정적메서드 fromInstant() 두 개의 메서드가 있다.
+
+
+UTC/Greenwich 기준의 고정 오프셋
+때로는 UTC(협정 세계시)/GMT(그리니치 표준시)를 기준으로 시간대를 표현하기도 한다.
+ZoneId의 서브클래스인 ZoneOffset 클래스로 그리니치 0도 자오선과 시간값으 차이를 표현할 수 있다.
+
+뉴욕 기준, '뉴욕은 런던보다 5시간 느리다'
+ZoneOffset newYorkOffset = ZoneOffset.of("-05:00);
+
+위의 코드에서 서머타임을 처리하기 위해서 UTC/GMT와 오프셋으로 날짜와 시간을 표현하는 OffsetDateTime을 만드는 방법이 권장된다.
+
+LocalDateTime dateTime = LocalDateTime.of(2014, Month.MARCH, 18, 13, 45);
+OffsetDateTime dateTimeInNewYork = OffsetDateTime.of(dateTime, newYorkOffset);
+
+새로운 날짜와 시간 API는 ISO 캘린더 시스템에 기반하지 않은 정보도 처리할 수 있는 기능을 제공.
+
+대안 캘린더 시스템 사용하기
+
+ISO-8601 캘린더 시스템은 실질적으로 전 세계에서 통용된다.
+하지만 자바8에선 추가로 4개의 캘린더 시스템을 제공.
+ThaiBuddhistDate, MinguoDate, JapaneseDate, HijrahDate
+4개의 클래스가 각각의 캘린터 시스템을 대표한다.
+
+위 4개의 클래스와 LocalDate 클래스(ISO)는 ChronoLocalDate 인터페이스를 구현.
+일반적으로 정적 메서드로 Temporal 인스턴스를 만들 수 있다.
+
+LocalDate date = LocalDate.of(2014, Month.MARCH, 18);
+JapaneseDate japaneseDate = JapaneseDate.from(date);
+
+또는 특정 Locale과 Locale에 대한 날짜 인스턴스로 캘린더 시스템을 만드는 방법도 있다.
+새로운 날짜와 시간 API에서 Chronology는 캘린더 시스템을 의미하며 정적 팩토리 메서드 ofLocale을 이용해서 Chronology의 인스턴스를 획득할 수 있다.
+
+Chronology japaneseChronology = Chronology.ofLocale(Locale.JAPAN);
+ChronoLocalDate now = japaneseChronology.dateNow();
+
+(Locale로 등록된 나라가 생각보다 몇 개 없음)
 
 
 
