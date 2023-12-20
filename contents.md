@@ -1,54 +1,96 @@
-스트림 API 멀티코어 사용 가능
-스트림의 병렬처리
-stream 자체는 멀티코어 병렬처리가 아니다 
-parallelStream() 이 멀티코어 병렬처리이다
+# 스트림이란 무엇인가?
+- 자바 8 API에 새로 추가된 기능  
+- 스트림을 이용하면 선언형으로 컬렉션 데이터(List 등) 처리 가능
+  - 선언적 이점이 먼데??  
+	loop(for/while)와 if 를 구현하지 않고 바로 동작수행을 지정함.  
+	for(int i = 0 ; 조건, i++){ ... } 같은 loop문  
+	for(Object obj : List){ ... } 같은 누적자 요소 필터링
+- 스트림 API 멀티코어 사용 가능  
+  - 스트림의 병렬처리  
+  - stream 자체는 멀티코어 병렬처리가 아니다.  
+  - parallelStream() 이 멀티코어 병렬처리이다.  
+- filter, sorted, map, collect 같은 여러 빌딩 블록 연산을 연결  
+  	복잡한 데이터 처리 파이프라인을 만들 수 있다.  
+	위 연산은 **고수준 빌딩 블록**으로 이루어져 있어 특정 스레딩 모델에 제한 없이 자유롭게 어떤 상황에서든 사용할 수 있다.  
+	데이터 처리 과정을 병렬화하면서 스레드와 락을 걱정할 필요가 없다.
 
-stream을 통해 선언적으로 코딩할 수 있다.
-선언적 이점이 먼데??
-loop와 if 를 구현하지 않고 바로 동작수행을 지정함.
-for(int i = 0 ; 조건, i++){ ... } 같은 loop문
-for(Object obj : List){ ... } 같은 누적자 요소 필터링
-
-filter, sorted, map, collect 같은 여러 빌딩 블록 연산을 연결
-복잡한 데이터 처리 파이프라인을 만들 수 있다. 
-위 연산은 고수준 빌딩 블록으로 이루어져 있어 특정 스레딩 모델에 제한 없이
-자유롭게 어떤 상황에서든 사용할 수 있다. 
-데이터 처리 과정을 병렬화하면서 스레드와 락을 걱정할 필요가 없다.
-
-스트림API는 왜 매우 비싼 연산인가?
 4,5,6장 학습하면 다음과 같은 코드 구현할 수 있다.
+```java
 Map<Dish.Type, List<Dish>> dishesByType =
 menu.stream().collect(groupingBy(Dish::getType));
+```
 
-위를 일반 명령형으로 프로그래밍한다면?
-String[] types = 중복제거 타입 그룹핑
-for를 types만큼해서 각 type별 요리들을 ArrayList에 담아줌.
-map.put(types[type수], list[type수]) 타입수만큼 진행
+위를 일반 명령형으로 프로그래밍한다면?  
+String[] types = 중복제거 타입 그룹핑  
+for를 types만큼해서 각 type별 요리들을 ArrayList에 담아줌.  
+map.put(types[type수], list[type수]) 타입수만큼 진행  
 
 기타 라이브러리: 구아바, 아파치, 람다제이
 구글에서 만든 구아바, 멀티맵, 멀티셋 등이 있다.
 
-자바8 스트림 API 이점
+#### 자바8 스트림 API 이점
 - 선언형 : 간결성, 가독성
 - 조립할 수 있음 : 유연성
 - 병렬화 : 성능이점
 
-new Dish("pork", false, 800, Dish.Type.MEAT)
+요리 리스트(메뉴)를 주요 예제로 사용
+```java
+List<Dish> menu = Arrays.asList(  
+  new Dish("pork", false, 800, Dish.Type.MEAT),
+  new Dish("beef", false, 700, Dish.Type.MEAT),
+  new Dish("chicken", false, 400, Dish.Type.MEAT),
+  new Dish("french fries", true, 530, Dish.Type.OTHER),
+  new Dish("rice", true, 350, Dish.Type.OTHER),
+  new Dish("season true", false, 120, Dish.Type.OTHER),
+  new Dish("pizza", true, 550, Dish.Type.OTHER),
+  new Dish("prawns", false, 300, Dish.Type.FISH),
+  new Dish("salmon", false, 450, Dish.Type.FISH)
+);
+```
 Dish는 다음과 같이 불변형 클래스다. 
 
+```java
 public class Dish{
-	private final String name;
-	private final boolean isVegeterian;
-	private final int calories;
-	private final Type type;
+   private final String name;
+   private final boolean vegeterian;
+   private final int calories;
+   private final Type type;
+
+   public Dish(String name, boolean vegetarian, int calories, Type type) {
+      this.name = name;
+      this.vegeterian = vegeterian;
+      this.calories = calories;
+      this.type = type;
+   }
+
+   public String getName(){
+      return name;
+   }
+
+   public boolean isVegetarian(){
+      return vegeterian;
+   }   
+
+   public int getCalories(){
+      return calories;
+   }
+
+   public type getType(){
+      return type;
+   }
+
+   @Override
+   public String toString() {
+      return name;
+   }
+
+   public enum Type { MEAT, FISH, OTHER }
+
 }
+```
 
-스트림과 컬렉션 차이
-
-필터링, 슬라이싱, 검색, 매칭, 매핑, 리듀싱
-
-스트림이란 뭘까?
-데이터 처리 연산을 지원하도록 소스에서 추출된 연속된 요소
+#### 스트림이란 뭘까?  
+> 데이터 처리 연산을 지원하도록 소스에서 추출된 연속된 요소
 
 - 연속된 요소 : 컬렉션과 마찬가지로 스트림은 특정 요소 형식으로 이루어진 연속된 값 집합의 인터페이스를 제공. 컬렉션의 주제는 데이터고 스트림의 주제는 계산이다. 
  
@@ -60,58 +102,69 @@ public class Dish{
 
 - 내부 반복 : 반복자를 이용해서 명시적으로 반복하는 컬렉션과 달리 스트림은 내부 반복을 지원.
 
+```java
 List<String> threeHighCaloriesDishNames = 
-menu.stream()
-	.filter( dish -> dish.getCalories() > 300 )
-	.map(Dish::getName)
-	.limit(3)
-	.collect(toList());
+menu.stream()						//메뉴(요리 리스트)에서 스트림 얻기
+	.filter( dish -> dish.getCalories() > 300 )	//파이프라인 연산만들기, 칼로리 필터링
+	.map(Dish::getName)				//이름 추출
+	.limit(3)					//선착순 3개 선택
+	.collect(toList());				//결과 List로 반환
+```
 
-collect를 제외한 나머지 연산들은 서로 파이프라인을 형성할 수 있도록 스트림을 반환함.
-(return this = 체이닝)
-메서드 참조 방식 Dish::getName 는 람다식으로 d -> d.getName()과 같다.
-collect는 연산처리된 데이터소스를 다른 형식으로 변환한다. 
+collect를 제외한 나머지 연산들은 서로 파이프라인을 형성할 수 있도록 스트림을 반환함. (return this = 체이닝)  
+메서드 참조 방식 Dish::getName 는 람다식으로 d -> d.getName()과 같다.  
+collect는 연산처리된 데이터소스를 다른 형식으로 변환한다.   
 
-컬렉션API vs 스트림API
+#### 컬렉션API vs 스트림API
 
-컬렉션에 저장된 데이터는 파일전체와 같고
-스트림은 실시간 스트리밍과 같아서 메모리에 전체 적재를 해두지 않고 계산할 때만 가져와서 계산을 진행함. 탐색을 한 번 한 이후 다시 탐색하려면 새로운 스트림을 만들어야 함.
-(만약 데이터소스가 I/O 채널이라면 소스를 반복 사용할 수 없으므로 새로운 스트림을 만들 수 없다.) 이게 먼말이여? 
-스트림은 단 한 번만 소비할 수 있다.
+컬렉션에 저장된 데이터는 **파일전체**와 같고 스트림은 **실시간 스트리밍**과 같아서 메모리에 전체 적재를 해두지 않고 계산할 때만 가져와서 계산을 진행함.  
+탐색을 한 번 한 이후 다시 탐색하려면 새로운 스트림을 만들어야 함.  
+(만약 데이터소스가 I/O 채널이라면 소스를 반복 사용할 수 없으므로 새로운 스트림을 만들 수 없다.) 이게 먼말이여?   
+스트림은 단 한 번만 소비할 수 있다.  
 
+```java
 List<String> title = Arrays.asList("java8", "in", "action");
 Stream<String>  s = title.stream();
-s.forEach(System.out::println);  -> java8, in, action이 출력
-s.forEach(System.out::println);  -> illegalStateException 발생 : 스트림이 이미 소비되었거나 닫힘.
+s.forEach(System.out::println);  // -> java8, in, action이 출력
+s.forEach(System.out::println);  // -> illegalStateException 발생 : 스트림이 이미 소비되었거나 닫힘.
+```
 
-외부 반복 vs 내부 반복 (데이터 반복 처리 방법, 누가 데이터를 반복 처리하는가?)
+외부 반복 vs 내부 반복  
+(데이터 반복 처리 방법, 누가 데이터를 반복 처리하는가?)  
 컬렉션은 사용자가 직접(데이터의 외부적으로) 요소를 반복, 스트림은 알아서 반복(라이브러리를 통해 데이터 내부적으로 반복)
 
 - 컬렉션 반복(for-each사용)
+```java
 List<String> names = new ArrayList<>();
 for(Dish dish : menu){
 	names.add(dish.getName());
 }
+```
 
 - 컬렉션 반복(반복자 사용)
+```java
 List<String> names = new ArrayList<>();
 Iterator<String> iterator = menu.iterator();
 while(iterator.hasNext()){
 	Dish dish = iterator.next();
 	names.add(dish.getName());
 }
+```
 
 - 스트림 내부 반복
+```java
 List<String> names = menu.stream()
 	.map(Dish::getName)
 	.collect(toList());
+```
 
 내부 반복을 사용할 때 이점은??
 
-스트림 라이브러리의 내부 반복은 데이터 표현과 하드웨어를 활용한 병렬성 구현을 자동으로 선택한다. 반면 for-each를 이용하는 외부 반복시 병렬성을 스스로 관리해야 한다.
-(병렬성을 스스로 관리한다는 것은 병렬성을 포기하던지 synchronized로 시작하는 과정을 선택하는 것이다.)
+스트림 라이브러리의 내부 반복은 데이터 표현과 하드웨어를 활용한 병렬성 구현을 자동으로 선택한다.  
+반면 for-each를 이용하는 외부 반복시 병렬성을 스스로 관리해야 한다.  
+(병렬성을 스스로 관리한다는 것은 병렬성을 포기하던지 synchronized로 시작하는 과정을 선택하는 것이다.)  
 
-
+```java
 List<String> highCaloricDishes = new ArrayList<>();
 Iterator<String> iterator = menu.iterator();
 while(iterator.hasNext()){
@@ -120,14 +173,16 @@ while(iterator.hasNext()){
 		highCaloricDishes.add(dish.getName());
 	}
 }
+```
 
 내부반복으로 리팩토링 ->
 
+```java
 List<String> highCaloricDishes = menu.stream()
 	.filter(dish -> dish.getCalories() > 300 )
 	.map(Dish::getName)
 	.collect(toList());
-
+```
 
 
 스트림의 연산자
