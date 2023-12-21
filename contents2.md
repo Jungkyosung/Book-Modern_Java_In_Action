@@ -1090,6 +1090,571 @@ API를 바꾸는 것이 왜 어려운가?
 라이브러리엔 모양의 크기를 조절하는데 필요한 setHeight, setWidth, getHeight, getWidth, setAbsoluteSize 등의 메서드를 정의하는 Resizable 인터페이스가 있다. 그뿐만 아니라 Rectangle이나 Square처럼 Resizable을 구현하는 클래스도 제공한다. 라이브러리가 인기를 얻으면서 일부 사용자는 직접 Resizable 인터페이스를 구현하는 Ellipse라는 클래스를 구현하기도 했다.
 
 
+API릴리즈 후 시간이 지나 Resizable에 부족한 기능이 있다는 것을 발견.
+예를 들어 Resizable 인터페이스에 크기 조절 인수로 모양의 크기를 조절할 수 있는 setRelativeSize라는 메서드가 있으면 좋을 것 같다.
+그래서 Resizable에 setRelativeSize를 추가한 다음, Square와 Rectangle 구현도 고침.
+라이브러리를 사용하는 이용자들도 구현을 고쳐야 한다.( <- 문제발생)
+
+
+##### API 버전 1
+
+초기 인터페이스 
+```java
+public interface Resizable extends Drawable {
+	int getWidth();
+	int getHeight();
+	void setWidth(int width);
+	void setHeight(int height);
+	void setAbsoluteSize(int width, int height);
+}
+```
+
+사용자 구현
+
+```java
+public class Ellipse implements Resizable {
+...
+}
+```
+
+이 사용자는 다양한 Resizable 모양(자신이 만든 Ellipse를 포함)을 처리하는 게임을 만들었다.
+
+```java
+public class Game {
+	public static void main(String ... args) {
+	List<Resizable> resizableShapes = 
+		Arrays.asList(new Square(), new Rectangle(), new Ellipse());
+	Utils.paint(resizableShapes);
+	}
+}
+
+public class Utils {
+	public static void paint(List<Resizable> 1) {
+		1.forEach(r -> {
+			r.setAbsoluteSize(42, 42);
+			r.draw();
+		});
+	}
+}
+```
+
+##### API 버전 2
+
+API보완 요청을 받아서 Resizable 인터페이스에 setRelativeSize(int, int)를 추가.(컴파일 에러 발생)
+
+변경 뒤
+```java
+public interface Resizable extends Drawable {
+	int getWidth();
+	int getHeight();
+	void setWidth(int width);
+	void setHeight(int height);
+	void setAbsoluteSize(int width, int height);
+	void setsetRelativeSize(int wFactor, int hFactor);
+}
+```
+
+사용자는 인터페이스에 메서드가 추가 됐기 때문에, 해당 메서드를 구현해야 한다.
+구현하지 않으면 컴파일 에러가 발생한다.
+인터페이스에 새로운 메서드를 추가하면 바이너리 호환성은 유지된다.
+바이너리 호환성 : 새로 추가된 메서드를 호출하지만 않으면 새로운 메서드 구현 없이 기존 클래스 파일 구현이 잘 동작함.
+하지만 언젠가 Resizable을 인수로 받는 Utils.paint에서 setRelativeSize를 사용하도록 코드를 바꿀 수 있다. 이때 Ellipse 객체가 인수로 전달되면 Ellipse는 setRelativeSize 메서드를 정의하지 않았으므로 런타임에 다음 에러가 발생한다.
+
+Exception in thread "main" java.lang.AbstractMethodError: lambdasinaction.chap9.Ellipse.setRelativeSize(II)V
+
+두 번째로 사용자가 Ellipse를 포함하는 전체 애플리케이션을 재빌드할 때 다음과 같은 컴파일 에러가 발생한다.
+
+lambdasinaction/chap9/Ellipse.java:6: error: Ellipse is not abstract and does not override abstract method setRelativeSize(int,int) in Resizable
+
+
+공개된 API를 고치면 기존 버전과의 호환성 문제가 발생한다.
+이런 이유로 공식 자바 컬렉션 API 같은 기존의 API는 고치기 어려움.
+대안으로는 자신만의 API를 별도로 만든 다음에 예전 버전과 새 버전을 직접 관리한다.
+(관리가 복잡하여 불편함)
+
+위 문제들을 디폴트 메서드로 해결할 수 있음.
+
+
+바이너리 호환성, 소스 호환성, 동작 호환성
+
+자바 프로그램을 바꾸는 것과 관련된 호환성 문제는 크게 바이너리/소스/동작 호환성 세가지로 분류 가능.
+바이너리 호환성 : 뭔가를 바꾼 이후에도 에러 없이 기존 바이너리가 실행될 수 있는 상황
+(바이너리 실행에는 인증, 준비, 해석 등의 과정 포함)
+소스 호환성 : 코드를 고쳐도 기존 프로그램을 성공적으로 재컴파일 가능
+동작 호환성 : 코드를 바꾼 다음에도 같은 입력값이 주어지면 프로그램이 같은 동작을 실행
+
+
+#### 디폴트 메서드란?
+
+default 라는 키워드로 시작.
+메서드 바디를 포함.
+
+위 문제를 해결하기 위해 디폴트 메서드를 구현
+
+```java
+default void setRelativeSize(int wFactor, int hFactor) {
+	setAbsoluteSize(getWidth()/ wFactor, getHeight() / hFactor);
+}
+```
+
+인터페이스가 구현을 가질 수 있고 클래스는 여러 인터페이스를 동시에 구현할 수 있으므로 결국 자바도 다중 상속을 지원하는 건가??(vs 클래스는 단일 상속만 됨)
+인터페이스를 구현하는 클래스가 디폴트 메서드와 같은 메서드 시그니처를 정의하거나 아니면 디폴트 메서드를 오버라이드 한다면 어떻게 될까? 이 문제를 해결할 수 있는 몇 가지 규칙은 추후 살펴보자.
+
+자바8 API에선 디폴트 메서드를 상당히 많이 활용했다.
+예를 들어, Collection 인터페이스의 stream 메서드처럼 부지불식간에 많은 디폴트 메서드를 사용했다.
+List인터페이스의 sort메서드도 디폴트 메서드다.
+Predicate, Function, Comparator 등 많은 함수형 인터페이스도 Predicate.and 또는 Function.andThen 같은 다양한 디폴트 메서드를 포함한다.(함수형 인터페이스는 오직 하나의 추상 메서드를 포함. 나머지는 디폴트 메서드로 구현)
+
+추상 클래스와 자바8의 인터페이스
+
+추상 클래스와 인터페이스는 뭐가 다른가?
+둘 다 추상 메서드와 바디를 포함하는 메서드를 정의할 수 있다.
+
+첫째, 클래스는 하나의 추상 클래스만 상속받을 수 있지만, 인터페이스는 여러 개 구현 가능.
+둘째, 추상 클래스는 인스턴스 변수(필드)로 공통 상태를 가질 수 있다. 하지만 인터페이스는 인스턴스 변수를 가질 수 없다.
+
+퀴즈. removeIf메서드 추가하기  
+여러분이 자바 언어와 API의 달인이다.
+어느 날 다수의 사용자로부터 ArrayList, TreeSet, LinkedList 및 다른 모든 컬렉션에서 사용할 수 있는 removeIf 메서드를 추가해달라는 요청을 받았다. removeIf 메서드는 주어진 프레디케이트와 일치하는 모든 요소를 컬렉션에서 제거하는 기능을 수행한다. 새로운 removeIf를 기존 컬렉션 API에 가장 적절하게 추가하는 방법은?
+
+해당 컬렉션들이 구현하는 인터페이스에 디폴트 메서드로 removeIf를 추가함.
+모든 컬렉션들은 java.util.Collection 인터페이스를 구현한다.
+
+```java
+default boolean removeIf(Predicate<? super E> filter) {
+	boolean removed = false;
+	Iterator<E> each = iterator()'
+	while(each.hasNext()) {
+		if(filter.test(each.next())) {
+			each.remove();
+			removed = true;
+		}
+	}
+	return removed;
+}
+```
+
+
+### 디폴트 메서드 활용 패턴
+
+선택형 메서드와 동작 다중 상속
+
+#### 선택형 메서드
+
+여러분은 아마 인터페이스를 구현하는 클래스에서 메서드의 내용이 비어있는 상황을 본 적이 있을 것이다.
+예를 들어 Iterator 인터페이스를 보자.
+Iterator는 hasNext와 next뿐 아니라 remove 메서드도 정의한다.
+사용자들이 remove 기능은 잘 사용하지 않으므로 자바8 이전에는 remove 기능을 무시했다. 결과적으로 Iterator를 구현하는 많은 클래스에서는 remove에 빈 구현을 제공했다.
+
+디폴트 메서드를 이용하면 remove 같은 메서드에 기본 구현을 제공할 수 있으므로 인터페이스를 구현하는 클래스에서 빈 구현을 제공할 필요가 없다.
+자바8의 Iterator 인터페이스는 다음처럼 remove 메서드를 정의한다.
+
+```java
+interface Iterator<T> {
+	boolean hasNext();
+	T next();
+	default void remove() {
+		throw new UnsupportedOperationException();
+	}
+}
+```
+
+기본 구현이 제공되므로 Iterator 인터페이스를 구현하는 클래스는 빈 remove 메서드를 구현할 필요없고, 불필요한 코드를 줄일 수 있다.
+
+
+#### 동작 다중 상속
+
+디폴트메서드를 통해 동작 다중 상속이 가능하다.
+클래스는 다중 상속을 이용해서 기존 코드를 재사용 할 수 있다. 
+
+단일 상속 vs 다중 상속
+
+- 단일 상속 : 하나의 추상클래스, 상위클래스를 상속받아서 코드 재사용
+- 다중 상속 : 자바8 이전은 하나의 클래스만 상속이 가능했기에 단일 상속이었다. 인터페이스는 다중 상속이 가능했는데, 인터페이스에 디폴트 메서드가 추가됐기 때문에 동작을 다중 상속한 코드 재사용이 가능해졌다.
+
+자바API에 정의된 ArrayList클래스
+
+```java
+public class ArrayList<E> extends AbstractList<E> implements List<E>, RandomAccess, Cloneable, Serializable {  // <- 하나의 클래스와 여러 인터페이스 상속 구현
+}
+```
+
+#### 다중 상속 형식
+
+여기서 ArrayList는 한 개의 클래스를 상속받고, 여섯 개의 인터페이스를 구현. 결과적으로 ArrayList는 AbstractList, List, RandomAccess, Cloneable, Serializable, Iterable, Collection의 서브형식이 된다. 
+따라서 디폴트 메서드를 사용하지 않아도 다중 상속을 활용할 수 있다.
+
+자바 8에선 인터페이스가 구현을 포함할 수 있으므로 클래스는 여러 인터페이스에서 동작(구현 코드)을 상속받을 수 있다. 다중 동작 상속이 어떤 장점을 제공하는지 예제로 살펴보자. 중복되지 않는 최소한의 인터페이스를 유지한다면 우리 코드에서 동작을 쉽게 재사용하고 조합할 수 있다.(그렇다면 만약 여러 인터페이스에 같은 이름의 디폴트 메서드가 있고 그 인터페이스들을 구현하는 클래스를 통해서 해당 디폴트 메서드를 실행 시킨다면 어떤 인터페이스의 디폴트 메서드가 실행될까? -> 동작 에러 발생! incompatible,양립불가 만약 그 디폴트 메서드를 구현클래스에서 오버라이딩 한다면 문제가 되지 않지만, 그렇지 않고 디폴트 메서드를 사용한다면 작동 불가하다.)
+
+#### 기능이 중복되지 않는 최소의 인터페이스
+
+우리가 만드는 게임에 다양한 특성을 갖는 여러 모양을 정의한다고 가정하자.
+어떤 모양은 회전할 수 없지만 크기는 조절할 수 있다. 어떤 모양은 회전할 수 있으며 움직일 수 있지만 크기는 조절할 수 없다. 최대한 기존 코드를 재사용해서 이 기능을 구현하려면 어떻게 해야 할까?
+
+먼저 setRotationAngle과 getRotationAngle 두 개의 추상 메서드를 포함하는 Rotatable 인터페이스를 정의한다. 인터페이스는 다음 코드에서 보여주는 것처럼 setRotationAngle과 getRotationAngle 메서드를 이용해서 디폴트 메서드 rotateBy도 구현한다.
+
+```java
+public interface Rotatable {
+	void setRotationAngle(int angleInDegrees);
+	int getRotationAngle();
+	default void rotateBy(int angleInDegrees) {  //<- rotateBy 메서드의 기본 구현
+		setRotationAngle((getRotationAngle() + angleInDegrees) % 360);
+	}
+}
+```
+
+위 인터페이스는 구현해야 할 다른 메서드에 따라 뼈대 알고리즘이 결정되는 템플릿 디자인 패턴과 비슷해 보인다.
+
+Rotatable을 구현하는 모든 클래스는 setRotationAngle과 getRotationAngle의 구현을 제공해야 한다.
+하지만 rotateBy는 기본 구현이 제공되므로 따로 구현을 제공하지 않아도 된다.
+
+다음은 Moveable 코드다.
+
+```java
+public interface Moveable {
+	int getX();
+	int getY();
+	void setX(int x);
+	void setY(int y);
+	
+	default void moveHorizontally(int distance) {
+		setX(getX() + distance);
+	}
+
+	default void moveVertically(int distance) {
+		setY(getY() + distance);
+	}
+```
+
+다음은 Resizable 코드다.
+
+```java
+public interface Resizable {
+	int getWidth();
+	int getHeight();
+	void setWidth(int width);
+	void setHeight(int height);
+	void setAbsoluteSize(int width, int height);
+
+	default void setRelativeSize(int wFactor, int hFactor) {
+		setAbsoluteSize(getWidth() / wFactor, getHeight() / hFactor);
+	}
+}
+```
+
+#### 인터페이스 조합
+
+이제 이들 인터페이스를 조합해서 게임에 필요한 다양한 클래스를 구현할 수 있다.
+예를 들어 다음 코드처럼 움직일 수 있고, 회전할 수 있으며, 크기를 조절할 수 있는 괴물 클래스를 구현할 수 있다.
+
+```java
+public class Monster implements Rotatable, Moveable, Resizable {
+...
+}
+```
+Monster 클래스는 Rotatable, Moveable, Resizable 인터페이스의 디폴트 메서드를 자동으로 상속받는다.
+
+상속받은 메서드를 직접 호출 가능.
+
+```java
+Monster m = new Monster();
+m.rotateBy(180);
+m.moveVertically(10);
+```
+
+이번에는 움직일 수 있으며 회전할 수 있지만, 크기는 조절할 수 없는 Sun클래스를 정의한다.
+
+이때 코드 복붙할 필요없이 Resizable인터페이스를 제외하고 나머지 인터페이스를 상속하면 사용가능하다.
+
+그리고 인터페이스에 디폴트 구현을 포함시키면 또 다른 장점이 생긴다. 예를 들어 moveVertically의 구현을 더 효율적으로 고쳐야 할 경우, 디폴트 메서드 덕분에 Moveable 인터페이스를 직접 고칠 수 있고 따라서 Moveable을 구현하는 모든 클래스도 자동으로 변경한 코드를 상속받는다.(물론 구현 클래스에서 메서드를 재정의 하지 않은 상황에 한해서다.)
+
+
+옳지 못한 상속
+
+상속으로 코드 재사용 문제를 모두 해결할 수 있는 것은 아니다. 예를 들어 한 개의 메서드를 재사용하려고 100개의 메서드와 필드가 정의되어 있는 클래스를 상속받는 것은 좋은 생각이 아니다.(왜?)
+이럴 땐 델리게이션, 즉 멤버 변수를 이용해서 클래스에서 필요한 메서드를 직접 호출하는 메서드를 작성하는 것이 좋다. 종종 'final'로 선언된 클래스를 볼 수 있다. 다른 클래스가 이 클래스를 상속받지 못하게 함으로써 원래 동작이 바뀌지 않길 원하기 때문이다. 예를 들어 String 클래스도 final로 선언되어 있다.String의 핵심 기능을 바꾸지 못하도록 제한할 수 있다.
+
+디폴트 메서드에도 이 규칙을 적용할 수 있다. 필요한 기능만 포함하도록 인터페이스를 최소한으로 유지한다면 필요한 기능만 선택할 수 있으므로 쉽게 기능을 조립할 수 있다.
+
+
+### 해석 규칙
+
+자바의 클래스는 하나의 부모 클래스만 상속 가능. 여러 인터페이스를 동시에 구현 가능.
+자바8은 디폴트 메서드가 추가돼서 같은 시그니처(이름)을 갖는 디폴트 메서드를 상속받는 상황이 생길 수 있다. 이런 상황에선 어떤 인터페이스의 디폴트 메서드를 사용할까?
+이를 해결할 수 있는 규칙이 필요하다.
+이 절에서는 자바 컴파일러가 이러한 충돌을 어떻게 해결하는지 설명한다.
+
+다음 코드는 의도적으로 문제를 보여주려고 만든 예제이다 실제론 자주 일어나지 않는다.
+
+```java
+public interface A {
+	default void hello() {
+		System.out.println("Hello from A");
+	}
+}
+
+public interface B extends A {
+	default void hello() {
+		System.out.println("Hello from B");
+	}
+}
+
+public interface C implement B, A {
+	public static void main(String ... args) {
+		new C().hello();  //A랑 B의 디폴트 메서드 중 뭐가 출력 될까?
+	}
+}
+```
+
+(내 예상은 B가 재정의 했다고 볼 수 있으니까 B의 hello가 실행 될 것 같음.
+아마도 C.hello()호출 -> B에서 발견 hello() 실행 순서가 아닐까?
+또는 implement 이후에 B를 먼저 기재했으므로 B가 아닐까? 싶음)
+
+C++의 다이아몬드 문제, 즉 같은 시그니처를 갖는 두 메서드를 상속받는 클래스를 들어본 독자도 있을 것이다. 이때 어떤 메서드가 사용될까? 
+
+#### 알아야 할 세 가지 해결 규칙
+1. 클래스가 항상 이긴다. 클래스나 슈퍼클래스에서 정의한 메서드가 디폴트 메서드보다 우선권을 갖는다.
+2. 1번 규칙 이외의 상황에서는 서브인터페이스가 이긴다. 상속관계를 갖는 인터페이스에서 같은 시그니처를 갖는 메서드를 정의할 때는 서브인터페이스가 이긴다. 즉, B가 A를 상속받는다면 B가 A를 이긴다.
+3. 여전히 디폴트 메서드의 우선순위가 결정되지 않았다면 여러 인터페이스를 상속받는 클래스가 명시적으로 디폴트 메서드를 오버라이드하고 호출해야 한다.
+
+에제를 다시 본다면, 서브인터페이스인 B가 이긴다. 
+
+이번에는 C가 D를 상속받는다면 어떤 일이 일어날까? extends D implements B, A 인 상황
+
+```java
+public class D implements A{ }
+public class C extends D implements B, A {
+	public static void main(String ... args) {
+		new C().hello(); 	// 무엇이 출력될까?
+	}
+}
+```
+
+(예상 D가 클래스기 때문에 D의 hello를 호출하여 실행.)
+
+1번 규칙은 클래스의 메서드 구현이 이긴다고 설명한다. D는 hello를 오버라이드 하지 않았고 단순히 인터페이스 A를 구현했다. 따라서 D는 인터페이스 A의 디폴트 메서드를 상속받는다. 2번 규칙에서는 클래스나 슈퍼클래스에 메서드 정의가 없다면 디폴트 메서드를 정의하는 서브인터페이스가 선택된다.
+따라서 컴파일러는 인터페이스 A의 hello나 인터페이스 B의 hello 중 선택해야 한다.
+여기서 B가 A를 상속받으므로 B의 hello가 출력된다.
+(D가 재정의 했다면 D의 hello가 실행됨)
+
+
+퀴즈. 해석 규칙 
+
+이전 예제를 사용. D가 A의 hello메서드를 오버라이드한다. 프로그램의 실행 결과는?
+
+```java
+public class D implements A {
+	void hello() {
+		System.out.println("Hello from D");
+	}
+}
+
+public class C extends D implements B, A {
+	public static void main(String ... args) {
+		new C().hello();
+	}
+}
+```
+
+1번 규칙으로 인해 D가 클래스이기 때문에 D가 실행됨.
+
+D가 다음처럼 구현되었다고 가정하자.
+
+```java
+public abstact class D implements A {
+	public abstaract void hello();
+}
+```
+
+그럼 A에서 디폴트 메서드를 제공함에도 불구하고 C는 hello를 구현해야 한다.
+
+#### 충돌 그리고 명시적인 문제 해결
+
+지금까진 1, 2번 규칙으로 해결 가능했으나, B가 A를 상속받지 않는 상황도 보자.
+
+그럴 경우엔 자바 컴파일러가 hello 메서드를 구별할 기준이 없으므로 "Error: class C inherits unrelated defaults for hello() from types B and A." 같은 에러가 발생한다.
+
+##### 충돌 해결
+
+클래스와 메서드 관계로 디폴트 메서드를 선택할 수 없는 상황에선 선택할 수 있는 방법이 없다. 개발자가 직접 클래스 C에서 사용하려면 메서드를 명시적으로 선택해야 한다.
+즉 클래스 C에서 hello메서드를 오버라이드한 다음 호출하려는 메서드를 명시적으로 선택해야 한다.
+자바8에선 X.super.m(...) 형태의 새로운 문법을 제공한다. 여기서 X는 호출하려는 메서드 m의 슈퍼인터페이스이다. 예를 들어 다음처럼 C에서 B의 인터페이스를 호출할 수 있다.
+
+```java
+public class C implements B, A {
+	void hello(){
+		B.super.hello();	//명시적으로 B를 선택
+	}
+}
+```
+
+퀴즈. 거의 비슷한 시그니처
+
+```java
+public interface A {
+	default Number getNumber() {
+		return 10;
+	}
+}
+
+public interface B {
+	default Integer getNumber() {
+		return 42;
+	}
+}
+
+public class C implements B, A {
+	public static void main(String ... args) {
+		System.out.println(new C().getNumber());
+	}
+}
+
+```
+
+출력 결과는??
+
+(예상, 메서드 시그니처에서 타입이 다른 경우인데, A랑 B는 상속관계가 아니고 구별할 수 있는 상황이 아니니까 에러가 발생하지 않을까 싶음)
+
+구분할 수 없으므로 컴파일 에러가 발생한다.
+
+
+#### 다이아몬드 문제
+
+C++ 커뮤니티를 긴장시킬 만한 마지막 시나리오를 살펴보자.
+
+```java
+public interface A {
+	default void hello() {
+		System.out.println("Hello from A");
+	}
+}
+public interface B extends A { }
+public interface C extends A { }
+public class D implements B, C {
+	public static void main(String ... args) {
+		new D().hello();		//무엇이 출력될까??
+	}
+}
+```
+
+인터페이스 A에 hello디폴트 메서드 구현
+그 A를 상속한 B , 하지만 디폴트 메서드 구현하지 않음.
+그 A를 상속한 C , 하지만 디폴트 메서드 구현하지 않음.
+
+D클래스에서 B와 C를 상속
+D는 무엇을?? 
+
+(예상, 컴파일러가 어떻게 설계돼었냐가 중요한 듯? 따지고 보면 hello는 어차피 A.B.hello()와 A.C.hello()가 실행될텐데. 이걸 충돌로 인지할지가 포인트 같음. 내 생각엔 충돌로 인식하지 않을까 싶음. A()가 두번 실행될 순 없으니까.)
+
+UML다이어그램에서 다이아몬드 모양으로 그릴 수 있기 때문에 다이아몬드 문제라고 불린다.
+실제로 선택할 수 있는 메서드 선언은 하나 뿐이다. A만 디폴트 메서드를 정의하고 있으므로 A의 결과가 출력된다.
+B에도 같은 시그니처의 디폴트 메서드 hello가 있다면? 2번 규칙에 해당하여 B의 결과가 출력된다.
+B와 C 모두 hello를 정의한다면? 충돌로 컴파일 에러 발생.
+
+다음처럼 인터페이스 C에 추상 메서드 hello(디폴트 메서드가 아님!) 를 추가하면?
+
+```java
+public interface C extends A {
+	void hello();
+}
+```
+
+(예상, 그냥 D에서 재정의 해야할 듯? 그럼 D의 hello가 실행됨.)
+
+C는 A를 상속받으므로 C의 추상메서드 hello가 A의 디폴트 메서드 hello보다 우선권을 가짐.
+따라서 컴파일 에러가 발생. 클래스D가 어떤 hello를 사용할지 명시적으로 선택해서 에러 해결.
+
+
+
+
+#자바 모듈 시스템 (자바 9의 신기능)
+
+요약
+- 자바가 진화해야 한다는 여론으로 자바가 모듈 시스템을 지원하기 시작
+- 주요 구조 : 모듈 declarations, requires, exports 지시어
+- 기존 자바 아카이브(JAR)에 적용되는 자동 모듈
+- 모듈화와 JDK 라이브러리
+- 모듈과 메이븐 빌드
+- 기본적인 requires, exports 외의 모듈 지시어 간단 요약
+
+자바9에서 가장 많이 거론되는 새로운 기능이 모듈 시스템이다.
+모듈 시스템은 직소프로젝트 내부에서 개발된 기능으로 완성까지 거의 십년 걸림.
+모듈화가 얼마나 중요한 기능추가며 이 기능을 구현하는 것이 얼마나 어려운지 걸린 시간을 보면 알 수 있다.
+
+자바 모듈 시스템은 한 권의 책으로 써야할 만큼 복잡한 주제다. 따라서 니콜라이 팔로그의 'The Java Module System'(Manning Publications, 2019)를 살펴봐라.
+
+### 압력 : 소프트웨어 유추
+
+모듈화란 무엇인가?
+모듈시스템은 어떤 문제를 해결할 수 있는가?
+지금까지 이 책은 문제를 그대로 서술하는 듯한 코드 즉 이해하고 유지보수하기 쉬운 코드를 구현하는 데 사용할 수 있는 새로운 언어 기능을 소개했다. 하지만 이러한 부분은 저수준의 영역에 해당한다.
+궁극적으로 소프트웨어 아키텍처 즉 고수준에서는 기반 코드를 바꿔야 할 때 유추하기 쉬워서 생산성을 높일 수 있는 소프트웨어 프로젝트가 필요하다.
+추론하기 쉬운 소프트웨어를 만드는 데 도움을 주는 관심사분리와 정보은닉을 살펴보자.
+
+#### 관심사분리
+
+관심사 분리(SoC, Seperation of Concerns)는 컴퓨터 프로그램을 고유의 기능으로 나누는 동작을 권장하는 원칙이다.
+다양한 형식으로 구성된 지출을 파싱하고, 분석한 다음 결과를 고객에게 요약 보고하는 회계 애플리케이션을 개발한다고 가정하자. SoC를 적용함으로 파싱, 분석, 레포트 기능을 모듈이라는 각각의 부분 즉, 서로 거의 겹치지 않는 코드 그룹으로 분리할 수 있다. 다시 말해 클래스를 그룹화한 모듈을 이용해 애플리케이션의 클래스 간의 관계를 시각적으로 보여줄 수 있다.
+
+"이미 자바 패키지가 클래스를 그룹으로 만들어요"라고 말하는 독자도 있을 것이다.
+맞는 말이지만 자바9 모듈은 클래스가 어떤 다른 클래스를 볼 수 있는지를 컴파일 시간에 정교하게 제어할 수 있다. 특히 자바 패키지는 모듈성을 지원하지 않는다.
+
+SoC 원칙은 모델, 뷰, 컨트롤러 같은 아키텍처 관점 그리고 복구 기법을 비즈니스 로직과 분리하는 등의 하위 수준 접근 등의 상황에 유의하다. SoC 원칙은 다음과 같은 장점을 제공.
+- 개별 기능을 따로 작업할 수 있으므로 팀이 쉽게 협업할 수 있다.
+- 개별 부분을 재사용하기 쉽다.
+- 전체 시스템을 쉽게 유지보수할 수 있다.
+
+#### 정보 은닉
+
+정보 은닉은 세부구현을 숨기도록 장려하는 원칙이다.
+이 원칙은 왜 중요한가?
+소프트웨어 개발 시 요구사항은 자주 바뀜.
+세부 구현을 숨김으로 프로그램의 어떤 부분을 바꿨을 때 다른 부분까지 영향을 미칠 가능성을 줄일 수 있음.
+캡슐화는 특정 코드 조각이 애플리케이션의 다른 부분과 고립되어 있음을 의미. 캡슐화된 코드의 내부적인 변화가 의도치 않게 외부에 영향을 미칠 가능성이 줄어듬. 자바에서는 클래스 내의 컴포넌트에 적절하게 private 키워드를 사용했는지를 기준으로 컴파일러를 이용해 캡슐화를 확인할 수 있음. 하지만 자바9 이전까진 클래스와 패키지가 의도된 대로 공개되었는지를 컴파일러로 확인할 수 있는 기능이 없었다.
+
+
+### 자바 소프트웨어
+
+잘 설계된 소프트웨어를 만들려면 이 두가지 원칙(관심사분리, 정보은닉)을 따르는 것이 필수다.
+패키지, 클래스, 인터페이스를 그룹으로 만들어 코드를 그룹화하여 UML 다이어그램 같은 도구를 이용하면 그룹 코드 간의 의존성을 시각적으로 보여줄 수 있으므로 소프트웨어를 추론하는데 도움이 된다.
+
+세 가지 특정 기능으로 구분된 사용자 파일 관리 애플리케이션의 UML 다이어그램을 보여준다.
+
+컨트롤러(UserProfileController) -> 뷰, 모델
+뷰(UserProfileView) -> 모델
+모델(User)
+
+정보은닉을 살펴보자. 자바에서는 public, protected, private 등의 접근 제한자와 패키지 수준 접근 권한 등을 이용해 메서드, 필드 클래스의 접근을 제어했다. 하지만 이런 방식으론 원하는 접근 제한을 달성하기 어려우며 심지어 최종 사용자에게 원하지 않는 메서드도 공개해야 하는 상황이 발생했다. 자바 초창기엔 애플리케이션과 의존성 체인이 상대적으로 작았고 이런 부분이 큰 문제가 아니었다. 
+요즘에는 자바 애플리케이션이 커지면서 문제가 부각되고 있다.(규모가 커짐으로써 추가 요구 발생=문제)
+설계자는 자신의 클래스에서 개인적으로 사용할 용도라고 생각할 수 있겠지만, 과정이 어쨌든 결과적으로 클래스에 public 필드가 있다면 사용자 입장에서는 당연히 사용할 수 있다고 생각하지 않겠는가?
+
+모듈화의 장점을 살펴봤는데 자바의 모듈 지원이 어떤 변화를 가져왔는지 궁금할 것이다.
+
+### 자바 모듈 시스템을 설계한 이유
+
+#### 모듈화의 한계
+
+안타깝게도, 자바9 이전까지는 모듈화된 소프트웨어 프로젝트를 만드는 데 한계가 있었다. 자바는 클래스, 패키지, JAR 세 가지 수준의 코드 그룹화를 제공한다. 클래스와 관련해 자바는 접근 제한자와 캡슐화를 지원했다. 하지만 패키지와 JAR 수준에서는 캡슐화를 거의 지원하지 않았다.
+
+##### 제한된 가시성 제어
+
+자바엔 public, protected, 패키지 수준, private 네 가지 가시성 접근자가 있음. 패키지 간의 가시성은 어떻게 제어할까? 많은 애플리케이션은 다양한 클래스 그룹을 정의한 여러 패키지가 있는데 패키지의 가시성 제어 기능은 유명무실한 수준이다. 한 패키지의 클래스와 인터페이스를 다른 패키지로 공개하려면 public 을 사용한다. 그러면 이들은 모두(원치않은 패키지에게도)에게 공개된다. 특히 기본 구현을 제공하는 의미로 "impl"이라는 문자열을 가진 패키지에서 이런 문제가 두드러진다.
+이런 상황에서 보통 패키지 내부의 접근자가 public 이므로 사용자가 이 내부구현을 마음대로 사용할 수 있다.
+내부적으로 사용할 목적으로 만든 구현을 다른 프로그래머가 임시적으로 사용해서 정착해버릴 수 있으므로 결국 기존의 애플리케이션을 망가뜨리지 않고 라이브러리 코드를 바꾸기 어려워진다. 보안 측면에서 볼 때 코드가 노출되었으므로 코드를 임의로 조작하는 위협에 더 많이 노출될 수 있다.
+
+##### 클래스 경로
+
+앞부분에서 이해하기 쉽고 유지보수하기 간단한 소프트웨어(추론하기 쉬운 소프트웨어)의 장점.
+또한 관심사 분리와 모듈간의 의존성 모델링도 언급했다. 안타깝게도 애플리케이션을 번들하고 실행하는 기능과 관련하여 자바는 태생적으로 약점을 갖는다. 클래스를 모두 컴파일한 다음 보통 한 개의 평범한 JAR파일에 넣고 클래스 경로에 이 JAR파일을 추가해 사용할 수 있다. 그러면 JVM이 동적으로 클래스 경로에 정의된 클래스를 필요할 때 읽는다.
+
+안타깝게도 클래스 경로와 JAR 조합에는 몇 가지 약점이 존재한다.
+
+첫째, 클래스 경로에는 같은 클래스를 구분하는 버전 개념이 없다.
+
+
+
+
+
  
 
 
