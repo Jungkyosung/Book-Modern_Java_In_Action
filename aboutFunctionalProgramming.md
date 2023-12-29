@@ -553,6 +553,199 @@ static TrainJourney append(TrainJourney a, TrainJourney b) {
 
 #### 트리를 사용한 다른 예제
 
+이번에는 다른 자료구조를 살펴보자. HashMap 같은 인터페이스를 구현할 때는 이진 탐색 트리가 사용된다.
+Tree는 문자열 키와 int 값을 포함한다.
+예를 들어 이름 키와 나이 정보값을 포함할 수 있다.
+
+```java
+class Tree {
+	private String key;		//키는 문자열
+	private int val;		//값은 int
+	private Tree left, right;	//트리로 왼쪽, 오른쪽
+	public Tree(String k, int v, Tree l, Tree r) {		//트리는 키,값,왼,오 입력
+		key = k; val = v; left = l; right = r;
+	}
+}
+
+class TreeProcessor {
+	public static int lookup(String k, int defaultval, Tree t) {  //찾기, 키랑 기본값
+		if (t == null) return defaultval; //t가 null이면 기본값을 반환해라
+		if (k.equals(t.key)) return t.val; //k키랑 t의 키가 같다면 t의 값을 반환
+		return lookup(k, defaultval,
+				//재귀 이진 탐색으로 최종 트리까지 타고 내려감.
+				k.compareTo(t.key) < 0 ? t.left : t.right); 
+	}
+	//트리의 다른 작업을 처리하는 기타 메서드
+}
+```
+
+이제 이진 탐색 트리를 이용해서 문자열값으로 int를 얻을 수 있다.
+주어진 키와 연관된 값을 어떻게 갱신할 수 있는지 살펴보자(우리가 찾으려는 키가 트리에 존재한다고 가정)
+
+```java
+public static void update(String k, int newval, Tree t) {
+	if (t == null) { /* 새로운 노드를 추가해야 함 */ }
+	else if (k.equals(t.key)) t.val = newval;
+	else update(k, newval, k.compareTo(t.key) < 0 ? t.left : t.right);
+}
+```
+
+새로운 노드를 추가할 때는 주의해야 한다. 가장 쉬운 방법은 update 메서드가 탐색한 트리를 그대로 반환하는 것이다(새로운 노드를 추가하지 않으면 기존 트리가 그대로 반환된다).
+하지만 이 방법은 그리 깔끔하지 못하다(사용자는 update가 즉석에서 트리를 갱신할 수 있으며, 전달한 트리가 그대로 반환된다는 사실, 원래 트리가 비어있으면 새로운 노드가 반환될 수 있다는 사실을 모두 기억해야 하기 때문이다).
+
+```java
+public static Tree update(String k, int newval, Tree t) {
+	if (t == null) 
+		t = new Tree(k, newval, null, null); //비어있다면 키, 값대로 루트 추가
+	else if (k.equals(t.key))	//키가 같다면 t값을 갱신
+		t.val = newval;
+	else if (k.compareTo(t.key) < 0)  //키를 비교해서 작으면 왼쪽 크면 오른쪽 트리로 이동
+		t.left = update(k, newval, t.left);
+	else
+		t.right = update(k, newval, t.right);
+	return t;
+```
+두 가지 update 버전 모두 기존 트리를 변경한다. 즉, 트리에 저장된 맵의 모든 사용자가 변경에 영향을 받는다.
+(재귀로 풀긴 하지만 t를 수정하기 때문에 기존 트리를 변경함)
+
+#### 함수형 접근법 사용
+
+이 문제를 함수형으로 어떻게 처리할 수 있을까?
+우선 새로운 키/값 쌍을 저장할 새로운 노드를 만들어야 한다.
+또한 트리의 루트에서 새로 생성한 노드의 경로에 있는 노드들도 새로 만들어야 한다(보통 노드를 새로 만드는 동작은 생각보다 비싸지 않은 편이다. d라는 깊이를 갖는 트리고 균형이 어느 정도 잡혀있다면 2^d 만큼의 개체를 가지고 있으므로 재생성 과정은 그중 일부 노드를 생성하는 과정에 불과하다)
+
+??이렇게 사용하기 빡세면 함수형 프로그래밍 어떻게 함. 이것도 나중에 적응되면 익숙해져서 쉽게 할 수 있을까?
+
+```java
+public static Tree fupdate(String k, int newval, Tree t) {
+	return (t == null) ?
+		new Tree(k, newval, null, null) :
+			k.equals(t.key) ?
+				new Tree(k, newval, t.left, t.right) :
+			k.compareTo(t.key) < 0 ?
+				new Tree(t.key, t.val, fupdate(k, newval, t.left), t.right) :
+				new Tree(t.key, t.val, t.left, fupdate(k, newval, t.right));
+}
+```
+
+
+위 코드에서는 if-then-else 대신 하나의 조건문을 사용했는데 이렇게 해서 위 코드가 부작용이 없는 하나의 표현식임을 강조했다. 하지만 취향에 따라 if-then-else문으로 코드를 구현할 수 있다.
+
+update와 fupdate의 차이는 뭘까? 이전에 update 메서드는 모든 사용자가 같은 자료구조를 공유하며 프로그램에서 누군가 자료구조를 갱신했을 때 영향을 받는다는 점을 설명했다.
+따라서 비함수형 코드에서는 누군가 언제든 트리를 갱신할 수 있으므로 트리에 어떤 구조체의 값을 추가할 때마다 값을 복사했다. 반면 fupdate는 순수한 함수형이다. fupdate에서는 새로운 Tree를 만든다.
+하지만 ***인수를 이용해서 가능한 한 많은 정보를 공유한다.***(??먼말이지??)
+사람의 이름과 나이를 노드로 저장하는 트리를 만들었다고 가정하자. 여기서 fupdate를 호출하면 기존의 트리를 갱신하는 것이 아니라 새로운 노드를 만든다.
+
+이와 같은 함수형 자료구조를 영속(저장된 값이 다른 누군가에 의해 영향을 받지 않는 상태)이라고 하며 따라서 프로그래머는 fupdate(뭔가 했더니 함수형 업데이트구만)가 인수로 전달된 자료구조를 변화시키지 않을 것이라는 사실을 확신할 수 있다. ***'결과 자료구조를 바꾸지 말라'***는 것이 자료구조를 사용하는 모든 사용자에게 요구하는 단 한가지 조건이다. 이를 무시하고 fupdate의 결과를 바꾸는 사람도 있을 것이다(예를 들어 Emily의 20을 다른 숫자로 바꿈).  결과 자료구조를 바꾸지 말라는 조건을 무시한다면 fupdate로 전달된 자료구조에 의도치 않은 그리고 원치 않는 갱신이 일어난다.
+fupdate가 좀 더 효율적일 때가 많다. '기존 구조를 변화시키지 않는다'라는 법칙 덕분에 조금 다른 구조체(예를 들어 사용자 A가 확인하는 트리와 사용자 B가 확인하는 갱신된 버전처럼) 간의 공통부분을 공유할 수 있다는 점에서 다른 구조체와 조금 다르다.
+Tree 클래스의 key, val, left, right 필드를 final로 선언함으로써 '기존 구조를 변화시키지 않는다'는 규칙을 강제할 수 있다. 하지만 final은 필드에만 적용되며 객체에는 적용되지 않으므로 각 객체의 필드에 final을 적절하게 사용해야 함을 기억하자.
+
+어떤 사람은 '나는 일부 사용자만 볼 수 있게 트리를 갱신하면서도 다른 일부 사용자는 이를 알아차릴 수 없게 하고 싶다'고 말한다.
+두 가지 방법이 있다.
+하나는 고전적인 자바 해법이다(어떤 값을 갱신할 때 먼저 복사해야 하는지 주의 깊게 확인).
+다른 하나는 함수형 해법이다.
+즉, 갱신을 수행할 때마다 논리적으로 새로운 자료구조를 만든 다음에(변화가 일어나지 않도록) 사용자에게 적절한 버전의 자료구조를 전달할 수 있다. 
+API로 이 방법을 강제할 수 있다. 자료구조의 고객이 볼 수 있도록 갱신을 수행해야 한다면 최신 버전을 반환하는 API를 사용할 수 있다.  반면에 보이지 않도록 갱신을 수행해야 한다면, 예를 들어 오래 실행되는 통계분석 같은 경우에는 변화가 일어나지 않도록 단순히 인수를 복사한 값을 반환하면 된다.
+
+이 기법은 레이저로 단 한 번 CD-R에 파일을 '갱신'하는 동작과 비슷하다. 여러 파일의 버전을 모두 CD에 저장했다가 적잘한 파일 시작 주소 블록을 전달할 수 있다(스마트 CD 젲가 소프트웨어라면 여러 파일 버전의 공통 부분을 공유하는 기능을 제공할 수도 있다). 자바는 CD보단 상황이 좋다. 자바에서 자료구조의 예전 버전은 적어도 자동으로 가비지 컬렉트되기 때문이다.
+(?솔직히 이번 파트는 무슨 소린지 잘 이해가 되지 않음. 대충 추상적으로 의미만 파악함.)
+
+
+### 스트림과 게으른 평가
+
+스트림은 데이터 컬렉션을 처리하는 편리한 도구임을 살펴봤다. 효율적인 구현 및 여러 이유로 자바8 설계자들은 스트림을 조금 특별한 방법으로 자바8에 추가했다. 그중 하나로 스트림은 단 한 번만 소비할 수 있다는 제약이 있어서 스트림은 재귀적으로 정의할 수 없다. 이 절에서는 이와 같은 제약 때문에 어떤 문제가 발생하는지 살펴볼 것이다.(그러네 스트림은 한 번만 사용하니까 함수형으로 못하는 구나. 나는 스트림을 사용하는 게 함수형 프로그래밍의 일부분이라고 생각했는데 아니네?)
+
+#### 자기 정의 스트림
+
+소수를 생성하는 6장의 예제로 재귀 스트림을 살펴보자. 다음 코드처럼 소수 스트림을 계산할 수 있었다.
+
+```java
+public static Stream<Integer> primes(int n) {
+	return Stream.iterate(2, i -> i + 1)	//반복자 2 부터 스트림 생성
+		.filter(MyMathUtils::isPrime)
+		.limit(n);
+}
+
+public static boolean isPrime(int candidate) {
+	int candidateRoot = (int) Math.sqrt((double) candidate);
+	return IntStream.rangeClosed(2, candidateRoot)
+			.noneMatch(i -> candidate % i == 0);
+}
+```
+추가적으로 candidate number로 정확히 나누어 떨어지는지 매번 모든 수를 반복 확인했다.(실제로 합성수=서로 다른 두 개 이상의 소수의 곱으로 이루어진 수, 는 나누어 떨어지는지 확인할 필요가 없다)
+이론적으로 소수로 나눌 수 있는 모든 수는 제외할 수 있다.
+
+결국 소수의 배수라면 제외해도 됨.
+
+다음은 소수로 나눌 수 있는 수를 제외하는 과정을 설명한다.
+
+1. 소수를 선택할 숫자 스트림이 필요하다.
+2. 스트림에서 첫 번째 수(스트림의 머리)를 가져온다. 이 숫자는 소수다(처음은 2)
+3. 이제 스트림의 꼬리에서 가져온 수로 나누어 떨어지는 모든 수를 걸러 제외시킨다.
+4. 이렇게 남은 숫자만 포함하는 새로운 스트림에서 소수를 찾는다. 이제 1번부터 다시 이 과정을 반복하게 된다. 따라서 이 알고리즘은 재귀다.
+
+이 알고리즘은 여러 가지 면에서 '부족한' 알고리즘이다. 다만 스트림이 어떻게 동작하는지 쉽게 보여줄 수 있는 좋은 간단한 알고리즘이다. 스트림 API로 이 알고리즘을 구현해보자.
+
+*** 1단계 : 스트림 숫자 얻기 ***
+IntStream.iterate 메서드를 이용하면 2에서 시작하는 무한 숫자 스트림을 생성할 수 있다.
+```java
+static IntStream numbers() {
+	return IntStream.iterate(2, n -> n + 1);
+}
+```
+*** 2단계 : 머리 획득 ***
+IntStream은 첫 번째 요소를 반환하는 findFirst라는 메서드를 제공한다.
+```java
+static int head(IntStream numbers) {
+	return numbers.findFirst().getAsInt();
+}
+```
+
+*** 3단계 : 꼬리 필터링 ***
+
+스트림의 꼬리를 얻는 메서드를 정의한다.
+
+```java
+static IntStream tail(IntStream nubmers) {
+	return numbers.skip(1);		//처음 1개의 스트림요소(head)을 버리고 반환
+}
+```
+
+다음처럼 획득한 머리로 숫자를 필터링할 수 있다.
+```java
+IntStream numbers = numbers();	//
+int head = head(numbers);
+IntStream filtered = tail(numbers).filter(n -> n % head != 0);
+```
+
+*** 4단계 : 재귀적으로 소수 스트림 생성 ***
+
+가장 어려운 부분이다. 다음 코드에서 보여주는 것처럼 반복적으로 머리를 얻어서 스트림을 필터링하려 할 수 있다.
+
+```java
+static IntStream primes(IntStream numbers) {
+	int head = head(numbers);
+	return IntStream.concat(
+		IntStream.of(head),
+		primes(tail(numbers).filter(n -> n % head != 0))  //2, 
+	);
+}
+```
+
+나쁜 소식
+
+안타깝게도 4단계 코드를 실행하면 "java.lang.IllegalStateException: stream has already been operated upon or closed"라는 에러가 발생한다. 사실 우리는 스트림을 머리와 꼬리로 분리하는 두 개의 최종연산 findFirst와 skip을 사용했다. 4장에선 최종연산을 스트림에 호출하면 스트림이 완전 소비된다는 사실을 증명했다.
+
+
+
+
+
+
+
+
+
+
+
 
 
 
