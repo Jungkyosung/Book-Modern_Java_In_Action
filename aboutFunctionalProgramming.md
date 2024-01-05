@@ -762,6 +762,591 @@ numbers.head #:: primes(numbers.tail filter (n -> n % numbers.head != 0))
 '자바8의 스트림은 게으르다'라는 설명을 들어봤을 것이다.(한 번도 안들어봤음 스트림 자체를 첨써봐서...)
 자바8의 스트림은 요청할 때만 값을 생성하는 블랙박스와 같다.
 스트림에 일련의 연산을 적용하면 연산이 수행되지 않고 일단 저장된다.
+스트림에 최종연산을 적용해서 실제 계산을 해야하는 상황에서만 실제 연산이 이루어진다.
+특히 스트림에 여러 연산(filter, map, reduce 등)을 적용할 때 이와 같은 특성을 활용할 수 있다.
+게으른 특성 때문에 각 연산별로 스트림을 탐색할 필요 없이 한 번에 여러 연산을 처리할 수 있다.
+(이게 먼말이야??)
+
+이 절에선 좀 더 일반적인 스트림의 형태인 게으른 리스트의 개념을 살펴본다.(게으른 리스트는 스트림과 비슷한 개념으로 구성된다.)
+또한 게으른 리스트는 고차원 함수라는 개념도 지원한다.(고차원 함수란 함수를 반환하거나 함수를 인자로 사용하는 함수였던 것 같은데)
+함숫값을 자료구조에 저장해서 함숫값을 사용하지 않은 상태로 보관할 수 있다.
+하지만 저장한 함숫값을 호출(즉, 요청)하면 더 많은 자료구조를 만들 수 있다.
+
+LinkedList의 요소는 메모리에 존재함. 하지만 LazyList의 요소는 Function이 요청해야 생성됨.
+
+LinkedList ■ ---꼬리---> ■ ---꼬리---> ■
+
+LazyList    ■ ---함수--->  □ ---함수---> □
+
+백문이 불여일견, 게으른 리스트가 실제로 동작하는 모습을 살펴보자. 이전에 설명한 알고리즘에서 무한한 소수 리스트를 생성해야 한다.
+
+
+####기본적인 연결 리스트
+
+다음 코드처럼 MyLinkedList라는 단순한 연결 리스트 형태의 클래스를 정의할 수 있다(예제 코드에선 필요한 최소 기능만 정의하는 MyList 인터페이스를 정의)
+
+```java
+interface MyList<t> {
+	T head();		//첫 요소
+		
+	MyList<T> tail();	//첫 요소를 제외한 나머지 요소 리스트
+
+	default boolean isEmpty() {	//디폴트 메서드로 비었는지 확인
+		return true;
+	}
+}
+
+class MyLinkedList<T> implements MyList<T> {
+	private final T head;
+	private final MyList<T> tail;
+	public MyLinkedList(T head, MyList<T> tail) {
+		this.head = head;
+		this.tail = tail;
+	}
+
+	public T head() {
+		return head;
+	}
+
+	public MyList<T> tail() {
+		return tail;
+	}
+	
+	public boolean isEmpty() {
+		return false;
+	}
+}
+
+class Empty<T> implements MyList<T> {
+	public T head() {
+		throw new UnsupportedOperationException();
+	}
+	
+	public MyList<T> tail() {
+		throw new UnsupportedOperationException();
+	}
+}
+
+```
+
+다음처럼 MyLinkedList 값을 만들 수 있다.	
+(이건 게으른 리스트가 아니기 때문에 5, 10이 이미 리스트에 연결되어 저장되어 있다. 추가적인 tail을 요청해도 값이 없기 때문에 더 이상 값을 생성할 수 없다.)
+
+MyList<Integer> l = new MyLinkedList<>(5, new MyLinkedList<>(10, new Empty<>()));
+
+head  = { 5 } , tail  = { 10, empty }
+
+head = { 10 }, tail = { empty }
+
+
+####기본적인 게으른 리스트
+
+3장에서 배운 Supplier<T>를 이용해서 게으른 리스트를 만들면 꼬리가 모두 메모리에 존재하지 않게 할 수 있다(Supplier<T>를 void -> T라는 함수형 디스크립터를 가진 팩토리로 생각할 수 있다). Supplier<T>로 리스트의 다음 노드를 생성할 것이다.
+
+게으른 리스트를 만드는 코드
+
+```java
+import java.util.function.Supplier;
+
+class LazyList<T> implements MyList<T> {
+	final T head;
+	final Supplier<MyList<T>> tail;
+	public LazyList(T head, Supplier<MyList<T>> tail) {
+		this.head = head;
+		this.tail = tail;
+	}
+	
+	public T head() {
+		return head;
+	}
+	
+	public MyList<T> tail() {
+		return tail.get();
+	}
+	public boolean isEmpty() {
+		return false;
+	}
+}
+```
+(Supplier 추가했을 뿐인데 게으른 리스트가 되버리네)
+
+이제 Supplier의 get메서드를 호출하면(마치 팩토리로 새로운 객체를 생성하듯이) LazyList의 노드가 만들어진다.
+이제 연속적인 숫자의 다음 요소를 만드는 LazyList의 생성자에 tail 인수로 Supplier를 전달하는 방식으로 n으로 시작하는 무한히 게으른 리스트를 만들 수 있다.
+
+```java
+public static LazyList<Integer> from(int n) {
+	return new LazyList<Integer>(n, ()-> from(n+1));
+}
+```
+
+아래 코드를 실행하면 '2 3 4'라고 출력됨을 확인할 수 있다. 실제로 숫자는 요청했을 때 만들어진다.
+System.out.println을 추가해서 확인할 수 있다.
+만약 요청했을 때 코드가 실행되는 것이 아니라 2부터 시작해서 모든 수를 미리 계산하려 한다면 프로그램은 영원히 종료되지 않을 것이다.
+
+```java
+LazyList<Integer> numbers = from(2);
+int two = numbers.head();
+int three = numbers.tail().head();	//이제 계속 tail에 head를 출력하면 출력이 되는 건가?
+int four = numbers.tail().tail().head();	//tail을 뽑고 계속해서 head를 출력하는 연산을 해야 하는건가?
+
+System.out.println( two + " " + three + " " + four);
+```
+
+```java
+MyList<Integer> a = numbers.tail();
+
+for (int i = 0; i < 10; i++) {	//계속해서 tail을 뽑아서 값을 출력할 수 있음.
+	a = a.tail();
+	int b = a.head();
+	System.out.println(b);
+}	
+```
+
+####소수 생성으로 돌아와서
+
+지금까지 만든 코드로 게으른 소수 리스트를 생성할 수 있는지 다시 한 번 확인하자(스트림 API로는 이 작업을 완료할 수 없었다)
+기존에 스트림 API를 사용했던 코드에 새로운 LazyList를 적용하자.
+
+```java
+public static MyList<Integer> primes(MyList<Integer> numbers) {
+	return new LazyList<>(
+		numbers.head(),
+		() -> primes(
+			numbers.tail()
+				.filter(n -> n % numbers.head() != 0)
+		)
+	);
+}
+```
+
+####게으른 필터 구현
+
+안타깝게도 LazyList(엄밀히 말해 List 인터페이스)는 filter메서드를 정의하지 않으므로 위 코드는 컴파일 에러가 발생한다! 이 문제를 해결하자.
+
+```java
+public MyList<T> filter(Predicate<T> p) {
+	return isEmpty() ?
+		this :
+		p.test(head()) ?
+			new LazyList<>(head(), () -> tail().filter(p)) :
+			tail().filter(p);
+}
+
+```
+
+이제 코드를 컴파일 할 수 있다. tail과 head호출을 연결해서 처음 세 개의 소수를 계산할 수 있다.
+
+
+```java
+LazyList<Integer> numbers = from(2);
+int two = primes(numbers).head();
+int three = primes(numbers).tail().head();
+int five = primes(numbers).tail().tail.head();
+
+System.out.println(two + " " + three + " " + five);
+```
+(그래서 이 게으른 리스트를 왜 사용했던 거더라?)
+
+위 코드를 실행하면 '2 3 5' 세 개의 소수를 출력한다. 이제 이 코드로 좀 더 다양한 시도를 해볼 수 있다.
+예를 들어 모든 소수를 출력해볼 수 있다(프로그램은 반복적으로 리스트의 머리와 꼬리를 출력하면서 printAll 메서드를 무한으로 실행할 것이다.)
+
+```java
+static <T> void printAll(MyList<T> list) {
+	while (!list.isEmpty()) {
+		System.out.println(list.head());
+		list = list.tail();
+	}
+}
+printAll(primes(from(2)));
+```
+
+이 장에서는 함수형 프로그래밍을 설명하고 있으므로 다음처럼 재귀적으로 문제를 깔끔히 해결할 수 있다.
+
+```java
+static <T> void printAll(MyList<T> list) {
+	if (list.isEmpty()) return;
+	System.out.println(list.head());
+	printAll(list.tail());
+}
+```
+
+그런데 위 코드는 생각처럼 무한히 실행되지 않는다. 자바는 꼬리 호출 제거를 지원하지 않으므로 스택오버 플로가 발생한다.
+
+####드디어 완성!
+
+지금까지 게으른 리스트와 함수를 만들었고 모든 소수를 포함하는 자료구조를 정의했다.
+그런데 지금까지 만든 자료구조가 어떤 유용성을 제공하는 걸까?
+(나도 이게 궁금하다 왜 필요한걸까? 알려주시라요!)
+여러분은 자바8 덕분에 함수를 자료구조 내부로 추가할 수 있다는 사실을 알았고, 이런 함수는 자료구조를 만든 시점이 아니라 요청 시점에 실행된다는 사실도 확인했다. 
+체스 같은 게임 프로그램 구현할 때도 이런 기능을 활용할 수 있다.
+체스의 말이 움직일 수 있는 모든 가능성을 개념적으로 표현하는 트리 자료구조(즉, 미리 계산하기에는 너무 큰 자료구조)를 준비하고 요청할 때만 이 자료구조를 생성할 수 있다.
+게으른 리스트는 또한 자바8의 기능 스트림과의 연결고리를 제공한다.
+이제 게으른 리스트와 스트림의 장점과 단점을 살펴볼 수 있다.
+
+아직까지 성능은 살펴보지 않았다.
+지금까지 적극적으로 기능을 실행해보는 것보다 게을느 편이 좋다고 가정했다.(왜??)
+물론 전통적인 실행 방법에서처럼 모든 값을 계산하는 것보단 요청했을 때 계산하는 것이 여러 면에서 좋다.
+안타깝게도 현실에서는 상황이 이처럼 단순하지 않다.
+자료구조의 10퍼센트 미만의 데이터만 활용하는 상황에서는 게으른 실행으로 인한 오버헤드가 더 커질 수 있다.(왜?? 뭔말이여 대체)
+결정적으로 LazyList값이 진짜로 게으르지 않을 수 있다.(이것도 궁금했음 진짠지 아닌지 나야 모르니까 확인 전까지...책에서 그렇다고 해서 그런가 보다 하고 넘어가고 있었음. 알아서 찝어주니 고맙네)
+from(2)등으로 LazyList값을 탐색할 때 10번째 항목까지는 모든 노드를 두 번 생성하므로 10개가 아니라 20개의 노드가 생성된다. 이 작업은 게으르게 처리할 수 없다. 
+LazyList탐색을 요청할 때마다 tail의 Supplier가 반복적으로 호출된다는 점이 문제다.
+처음 탐색 요청을 호출할 때만 tail의 Supplier가 호출되도록 하여(그리고 결과값을 캐시해서) 이 문제를 해결할 수 있다. 
+LazyList에 private Optional<LazyList<T>> alreadyComputed 필드를 추가하고 tail메서드가 적절하게 리스트를 업데이트하도록 정리할 수 있다.
+순수 함수형 언어 하스켈은 이와 같은 방식으로 자신의 자료구조를 적당히 게으르게 정리한다.
+하스켈의 처리 방식에 관심이 있다면 인터넷에 다양한 기사가 있으니 살펴봐라.
+(적당히 게으르게?? 적당히에 대한 로직이 들어있나보네)
+
+게으른 자료구조는 강력한 프로그래밍 도구라는 사실을 기억하자.
+애플리케이션을 구현하는 데 도움을 준다면 게으른 자료구조를 사용하자.
+하지만 그로 인해 효율성이 떨어진다면 전통적인 방식으로 구현하자.
+(트레이드 오프를 고려하자)
+
+이제 거의 모든 함수형 프로그래밍 언어에서는 제공하지만 자바에선 지원하지 않는 기능인 패턴 매칭을 살펴보자.
+
+
+###패턴 매칭
+
+일반적으로 함수형 프로그래밍을 구분하는 또 하나의 중요한 특징으로 (구조적인) 패턴 매칭을 들 수 있다(정규표현식 그리고 정규표현식과 관련된 패턴 매칭과는 다르다.)
+1장에선 수학에서는 다음과 같은 정의를 할 수 있다고 설명했다.
+
+f(0) = 1
+f(n) = n * f(n-1) 그렇지 않으면
+(?여기서 그렇지 않으면이 저기 써있는 이유를 잘 모르겠음. 번역이 잘못된 건가? 결국에 조건문을 통해 처리를 해준다는 거 같긴 함)
+
+반면 자바에서는 if-then-else나 switch문을 사용해야 한다.
+자료형이 복잡해지면서 이러한 작업을 처리하는 데 필요한 코드(그리고 관련 잡동사니)의 양도 증가했다.
+패턴 매칭을 사용하면 이러한 것들을 줄일 수 있다.
+
+트리 탐색 예제로 이 문제를 살펴보자.
+숫자와 바이너리 연산자로 구성된 간단한 수학언어가 있다고 가정하자.
+
+class Expr { ... }
+class Number extends Expr { int val; ... }
+class BinOp extends Expr { String opname; Expr left, right; ... }
+
+표현식을 단순화하는 메서드를 구현해야 한다고 하자. 예를 들어 5 + 0은 5로 단순화할 수 있다.
+즉, new BinOp("+", new Number(5), new Number(0))은 Number(5)로 단순화할 수 있다.
+Expr 구조체를 다음처럼 탐색할 수 있다.
+(5 + 0은 5와 같기 때문에 그냥 5로 표현하자 같은 소리 같음)
+
+```java
+Expr simplifyExpression(Expr expr) {
+	if(expr instanceof BinOp
+		&& ((BinOp)expr).opname.equals("+"))
+		&& ((BinOp)expr).right instanceof Number
+		&& ... //코드가 깔끔하지 못함.
+		&& ... ) {
+		return (Binop)expr.left;
+	}
+	...
+}
+```
+코드가 매끄럽지 않다.
+(?난 잘 모르겠다 뭐가 매끄럽지 않은 건지 그냥 &&가 많이 들어간다는 뜻인가?)
+
+####방문자 디자인 패턴
+
+자바에선 방문자 디자인 패턴으로 자료형을 언랩할 수 있다.
+특히 특정 데이터 형식을 '방문'하는 알고리즘을 캡슐화하는 클래스를 따로 만들 수 있다.
+(?특정 연산자를 언랩해서 상위 표현식 클래스로 올릴 수 있다는 것 같음. 로직하나에 )
+방문자 패턴은 어떻게 동작하는가?
+방문자 클래스는 지정된 데이터 형식의 인스턴스를 입력으로 받는다.
+그리고 인스턴스의 모든 멤버에 접근한다.
+방문자 패턴은 다음과 같이 작동한다.
+우선 SimplifyExprVisitor를 인수로 받는 accept를 BinOp에 추가한 다음에 BinOp 자신을 SimplifyExprVisitor로 전달한다(Number에서 비슷한 메서드를 추가한다.)
+
+```java
+class BinOp extends Expr {
+	...
+	public Expr accept(SimplifyExprVisitor v) {
+		return v.visit(this);
+	}
+}
+```
+
+이제 SimplifyExprVisitor는 BinOp 객체를 언랩할 수 있다.
+
+```java
+public class SimplifyExprVisitor {
+	...
+	public Expr visit(BinOp e) {
+		if("+".equals(e.opname) && e.right instanceof Number && ...) {
+			return e.left;
+		}
+	}
+}
+```
+
+####패턴 매칭의 힘
+
+패턴 매칭이라는 좀 더 단순한 해결 방법도 있다.(자바에서 지원하지 않음)
+자바는 패턴 매칭을 지원하지 않으므로 스칼라 프로그래밍 언어로 패턴 매칭이 뭔지 보여주려 한다.
+자바에서 패턴 매칭을 지원했다면 어떤 방식으로 문제를 해결했을지 유추할 수 있을 것이다.
+
+수식을 표현하는 Expr이라는 자료형이 주어졌을 때 스칼라 프로그래밍 언어로는 다음처럼 수식을 분해하는 코드를 구현할 수 있다(자바와 문법이 가장 비슷)
+
+```scala
+def simplifyExpression(expr: Expr): Expr = expr match{
+	case BinOp("+", e, Number(0)) => e	// 0 더하기 = 의미없는 연산
+	case BinOp("*", e, Number(1)) => e	// 1 곱하기 = 의미없는 연산
+	case BinOp("/", e, Number(1)) => e	// 1 나누기 = 의미없는 연산
+	case _ => expr				// expr을 단순화할 수 없다.
+}
+```
+
+트리와 비슷한 자료구조를 다룰 때 이와 같은 패턴 매칭을 사용하면 매우 간결하고 명확한 코드를 구현할 수 있다.
+특히 컴파일러를 만들거나 비즈니스 규칙 처리 엔진을 만들 때 유용하다.
+
+```scala
+Expression match { case Pattern => Expression ... }
+```
+
+위 스칼라 문법은 자바 문법과 비슷하다.
+
+```java
+switch (Expression) { case Constant : Statement ... }
+```
+
+스칼라의 와일드카드 case는 자바의 default:와 같은 역할을 한다.
+(?자바의 default: 가 무슨 뜻인데? switch-case문의 default: 같은 건가?)
+스칼라와 자바의 가장 큰 구문론적 차이는 스칼라가 표현지향인 반면 자바는 구문지향이라는 점이다.
+프로그래머의 관점에서 느끼는 차이점은 자바의 case 패턴에서는 몇 가지 기본형, 열거형, 기본형을 감싼 특수한 클래스, 문자열 등을 사용할 수 있다는 것이다. 패턴 매칭을 지원하는 언어의 가장 큰 실용적인 장점은 아주 커다란 switch문이나 if-then-else문을 피할 수 있다는 것이다.
+(조건 구문의 수가 줄어든다)
+
+스칼라의 패턴 매칭의 쉬운 표현 방식은 자바보다 뛰어난 기능이라는 사실을 쉽게 확인할 수 있다.
+그리고 자바도 좀 더 표현력 있는 switch문을 지원할 것을 기대한다.
+
+하지만 자바8의 람다를 이용하면 패턴 매칭과 비슷한 코드를 만들 수 있다.
+람다를 이와 같은 방식으로 활용할 수 있다는 사실을 보여주는 좋은 예가 될 것이다.
+
+#####자바로 패턴 매칭 흉내 내기
+(?현재 내가 이걸 알필요가 있는지는 모르겠음 아마 이걸 차라리 스칼라를 배워서 적용하는 게 빠를 수도?)
+스칼라의 패턴 매칭인 match 표현식이 어떻게 동작하는지 다음 예제로 살펴보자.
+```scala
+def simplifyExpression(expr: Expr): Expr = expr match {
+	case BinOp("+", e, Number(0)) => e
+	...
+```
+
+위 코드는 expr이 BinOp인지 확인하고 expr에서 세 컴포넌트(opname, left, right)를 추출한 다음에, 이 컴포넌트에 패턴 매칭을 시도한다.
+첫째는 String +, 둘째는 변수 e(항상 매치되는), 셋째는 Number(0)으로 매치한다. 즉, 스칼라(그리고 다른 많은 함수형 언어)의 패턴 매칭은 다수준(multilevel)이다.
+자바8의 람다를 이용한 패턴 매칭 흉내 내기는 단일 수준의 패턴 매칭만 지원한다.
+즉, 이전 예제에서 BinOp(op, l, r)이나 Number(n)은 괜찮지만 BinOp("+", e, Number(0))은 지원하지 않는다. 먼저 규칙을 정하자. 람다를 이용하며 코드에 if-then-else가 없어야 한다.
+'조건 ? e1 : e2'와 메서드 호출로 if-then-else를 대신할 수 있다.
+
+```java
+myIf(condition, () -> e1, () -> e2);
+```
+
+어딘가에(아마도 라이브러리에) 다음을 정의한다(T 형식의 제네릭)
+
+```java
+static <T> T myIf(boolean b, Supplier<T> truecase, Supplier<T> falsecase) {
+	return b ? truecase.get() : falsecase.get();
+}
+```
+
+T 형식은 조건 표현식의 결과 형식을 의미한다. 이와 같은 기법을 if-then-else에도 적용할 수 있다.
+
+물론 일반 코드에선 if-then-else를 사용하는 것이 코드의 명확성을 더 높일 수 있다.
+하지만 자바의 switch와 if-then-else가 패턴 매칭에는 도움이 되질 않으며 람다를 이용하면 단일 수준의 패턴 매칭을 간단하게 표현할 수 있으므로 여러 개의 if-then-else 구분이 연결되는 상황을 깔끔하게 정리할 수 있다.
+
+BinOp와 Number 두 서브클래스를 포함하는 Expr 클래스의 패턴 매칭값으로 돌아와서 patternMatchExpr이라는 메서드를 정의할 수 있다(여기서도 제네릭 T는 패턴 매칭의 결과 형식이다)
+
+```java
+interface TriFunction<S, T, U, R> {
+	R apply(S s, T t, U u);
+}
+
+static <T> T patternMatchExpr(
+	Expr e,
+	TriFunction<String, Expr, Expr, T> binopcase,
+	Function<Integer, T> numcase,
+	Supplier<T> defaultcase) {
+	return (e instanceof BinOp) ?
+		binopcase.apply(((BinOp)e).opname, ((BinOp)e).left, ((BinOp)e).right) :
+		(e instanceof Number) ?
+		numcase.apply(((Number)e).val) : defaultcase.get();
+}
+```
+
+다음 코드를 살펴보자.
+```
+patternMatchExpr(e, (op, l, r) -> { return binopcode; },
+		(n) -> { return numcode; },
+		() -> { return defaultcode; });
+```
+
+위 코드는 e가 BinOp인지 (BinOp라면 식별자 op, l, r로 BinOp에 접근할 수 있는 binopcode를 실행) 아니면 Number인지 (Number라면 n값에 접근할 수 있는 numcode를 실행) 확인한다.
+이 메서드에는 BinOp나 Number가 아닌 트리 노드를 생성했을 때 실행되는 defaultcode도 존재한다.
+
+다음 예제는 patternMatchExpr을 이용해서 덧셈과 곱셈 표현식을 단순화하는 방법을 보여준다.
+
+```java
+public static Expr simplify(Expr e) {
+	TriFunction<String, Expr, Expr, Expr> binopcase = //BinOp 표현식 처리
+		(opname, left, right) -> {
+			if("+".equals(opname)) {
+				if(left instanceof Number && ((Number) left).val == 0) {
+					return right;
+				}
+				if(right instanceof Number && ((Number) right).val == 0) {
+					return left;
+				}
+			}
+			if("*".equals(opname)) {  //곱셈처리
+				if(left instanceof Number && ((Number) left).val == 1) {
+					return right;
+				}
+				if(right instanceof Number && ((Number) right).val == 1) {
+					return left;
+				}
+			}
+			return new BinOp(opname, left, right);
+		};
+	Function<Integer, Expr> numcase = val -> new Number(val);  //숫자처리
+	Supplier<Expr> defaultcase = () -> new Number(0);  //수식을 인식할 수 없을 때 기본 처리
+	return patternMatchExpr(e, binopcase, numcase, defaultcase);
+}
+```
+
+다음처럼 simplify 메서드를 호출할 수 있다.
+
+```java
+Expr e = new BinOp("+", new Number(5), new Number(0));
+Expr match = simplify(e);
+System.out.println(match);	//5출력
+```
+
+지금까지 고차원 함수, 커링, 영속 자료구조, 게으른 리스트, 패턴 매칭 등 많은 정보를 살펴봤다.
+이제 지금까지 다루지 않은 좀 더 중요하고 복잡한 정보를 살펴보자.
+
+
+###기타 정보
+
+이 절에선 함수형 그리고 참조 투명성이라는 특성과 관련된 두 가지 세부 주제를 살펴볼 것이다.
+하나는 효율성과 관련된 것이고 다른 하나는 같은 결과를 반환하는 것과 관련된 염려사항이다.
+두 가지 모두 흥미로운 주제지만 개념적으로 핵심적인 내용은 아니어서 이렇게 마지막 부분에서 다룬다.
+또한 두 개 이상의 함수를 인수로 받아서 다른 함수를 반환하는 메서드나 함수를 가리키는 콤비네이터의 개념도 살펴본다.
+콤비네이터는 자바8 API에 여러 기능을 추가하도록 영감을 준 기능이다.
+
+####캐싱 또는 기억화
+
+트리 형식의 토포로지(topology, 노드나 링크가 연결된 것을 말함)를 갖는 네트워크 범위 내에 존재하는 노드의 수를 계산하는 computeNumberOfNodes(Range)라는 부작용 없는 메서드가 있다고 가정하자.
+다행히 네트워크는 불변(즉, 구조가 변하지 않음)이지만 computeNumberOfNodes를 호출했을 때 구조체를 재귀적으로 탐색해야 하므로 노드 계산 비용이 비싸다. (?구조체를 재귀적으로 탐색하므로 메모리 비용이 높단 뜻인가?)
+게다가 이와 같은 계산을 반복해서 수행해야 할 것 같다.
+이때 참조 투명성이 유지되는 상황이라면 간단하게 추가 오버헤드를 피할 수 있는 방법이 생긴다.
+표준적인 해결책으로 기억화(memorization, 아마 피보나치 재귀에서 사용하는 기법을 말하는 듯)라는 기법이 있다.
+기억화는 메서드에 래퍼로 캐시(HashMap 같은)를 추가하는 기법이다.
+래퍼가 호출되면 인수, 결과 쌍이 캐시에 존재하는지 먼저 확인한다.
+캐시에 값이 존재하면 캐시에 저장된 값을 즉시 반환한다.
+캐시에 값이 없다면 computeNumberOfNodes를 호출해서 결과를 계산한 다음 새로운 인수, 결과 쌍을 캐시에 저장하고 결과를 반환한다.
+엄밀히 따져서 캐싱, 즉 다수의 호출자가 공유하는 자료구조를 갱신하는 기법이므로 이는 순수 함수형 해결방식은 아니지만 감싼 버전의 코드는 참조 투명성을 유지할 수 있다.
+(?감싼 버전의 코드가 뭐지?)
+
+다음은 캐싱을 사용하는 예제 코드다.
+
+```java
+final Map<Range, Integer> numberOfNodes = new HashMap<>();	//final로 외부에 선언
+Integer computeNumberOfNodesUsingCache(Range range) {	//외부에 있는 걸 함수형에서 사용할 수 있나? 문제 없나 노드가 불변이라? 어차피 계산된 결과를 찾아서 사용하기가 전부라 의미 없는 듯? 
+	Integer result = nubmerOfNodes.get(range) {
+	if(result != null) {
+		return result;
+	}
+	result = computeNumberOfNodes(range);
+	numberOfNodes.put(range, result);
+	return result;
+}
+```
+
+NOTE_ 아래 예제에서 볼 수 있는 것처럼 자바8에서는 computeIfAbsent라는 유용한 메서드를 Map 인터페이스에 추가했다. 자바8에서 추가된 메서드는 부록B에서 확인할 수 있다. 메서드 computeIfAbsent를 사용하면 좀 더 명료하게 코드를 구현할 수 있다.(?재귀를 사용한다면 Map캐싱을 자주 쓸 일이 많아서 Map에 아싸리 추가한 듯?)
+
+```java
+Integer computeNumberOfNodesUsingCache(Range range) {
+	return numberOfNodes.computeIfAbsent(range, this::computeNumberOfNodes);
+}
+```
+
+메서드 computeNumberOfNodesUsingCache는 참조투명성을 갖는다(computeNumberOfNodes도 참조 투명하다는 가정하에).
+하지만 numberOfNodes는 공유된 가변 상태며 HashMap은 동기화되지 않았으므로 스레드 안전성이 없는 코드다.
+(?위에서 내가 궁금했던 내용이네)
+HashMap 대신 잠금으로 보호되는 HashTable이나 잠금 없이 동시 실행을 지원하는 ConcurrentHashMap을 사용할 수 있지만 다중 코어에서 numberOfNodes를 동시에 호출하면 성능이 크게 저하될 수 있다.
+(?솔직히 HashTable과 ConcurrentHashMap을 사용해 본 적이 없어서 어떤 장단점이 있는 자료구존지 모르겠음 한 번 찾아봐야겠음 나중에) 
+(?동기화를 한다는 것은 lock을 건다는 거기 때문에 성능저하가 발생할 것 같음)
+이는 맵에 range가 있는지 찾는 과정과 인수, 결과 쌍을 맵에 추가하는 동작 사이에서 레이스 컨디션이 발생하기 때문이다.
+즉, 여러 프로세스가 같은 값을 맵에 추가하기 위해 여러 번 계산하는 일이 발생할 수 있다.
+가장 좋은 방법은 함수형 프로그래밍을 사용해서 동시성과 가변 상태가 만나는 상황을 완전히 없애는 것이다.
+하지만 캐싱 같은 저수준 성능 문제는 해결되지 않는다.
+캐싱을 구현할 것인지 여부와는 별개로 코드를 함수형으로 구현했다면 우리가 호출하려는 메서드가 공유된 가변 상태를 포함하지 않음을 미리 알 수 있으므로 동기화 등을 신경 쓸 필요가 없어진다.
+
+####'같은 객체를 반환함'은 무엇을 의미하는가?
+
+이전 이진트리 예제를 다시 살펴보자.
+변수 t는 기존 트리를 가리키는데 fupdate("Will", 26, t)를 호출하면 새로운 트리가 생성되고 변수 t2로 할당되는 부작용을 보여준다.
+t 그리고 t에서 접근할 수 있는 모든 자료구조는 변하지 않았다는 사실을 명확히 보여준다.
+
+t3 = fupdate("Will", 26, t);
+
+이번에는 t2 대신 t3라는 변수가 새로 생성된 세 개의 노드를 가리킨다.
+'fupdate는 참조 투명성을 갖는가?'라는 의문이 생긴다.
+참조투명성이란 '인수가 같다면 결과도 같아야 한다'라는 규칙을 만족함을 의미한다.
+여기서 t2와 t3은 서로 다른 참조다.
+즉, (t2 == t3)을 만족하지 않으므로 fupdate는 참조투명성을 갖지 않는다고 결론내릴 수 있다.
+그러나 자료구조를 변경하지 않는 상황에서 참조가 다르다는 것은 큰 의미가 없으며 t2와 t3이 논리적으로 같다고 판단할 수 있다.
+(?이게 먼말이지?? 변수t2,t3만 다를 뿐 참조하는 값은 같다는 건가?)
+참조 투명성이냐 아니냐를 토론하자면 얘기가 아주 길어진다.
+일반적으로 함수형 프로그래밍에서는 데이터가 변경되지 않으므로 같다는 의미는 ==(참조가 같음)이 아니라 구조적인 값이 같다는 것을 의미한다.
+따라서 함수형 프로그래밍 관점에서 fupdate는 참조 투명성을 갖는다고 말할 수 있다.
+
+
+####콤비네이터
+
+함수형 프로그래밍에선 두 함수를 인수로 받아 다른 함수를 반환하는 등 함수를 조합하는 고차원함수를 많이 사용하게 된다.
+이처럼 함수를 조합하는 기능은 콤비네이터라고 부른다.
+자바8 API에 추가된 많은 기능은 콤비네이터의 영향을 받았다.
+(?이런 내용을 알고 글을 쓰려면 함수형 프로그래밍을 먼저 공부했고 이후 자바8 API를 공부했어야 가능할 듯)
+예를 들어 CompletableFuture 클래스에는 thenCombine이라는 메서드가 추가되었다.
+thenCombine메서드는 CompletableFuture와 BiFunction 두 인수를 받아 새로운 CompletableFuture를 생성한다.
+함수형 프로그래밍의 콤비네이터를 자세히 살펴보진 않을 것이다.
+하지만 몇 가지 예제를 통해 함수를 인수로 받아서 또 다른 함수를 반환하는 동작이 함수형 프로그래밍에서 얼마나 흔하고, 자연스러운 일인지 확인할 수 있다.
+다음은 함수조합이라는 개념을 보여주는 코드다.
+
+```java
+static <A, B, C> Function<A, C> compose(Function<B, C> g, Function<A, B> f) {
+	return x -> g.apply(f.apply(x));
+}
+```
+
+compose 함수는 f와 g를 인수로 받아서 f의 기능을 적용한 다음에 g의 기능을 적용하는 함수를 반환한다.
+이 함수를 활용하면 콤비네이터로 내부 반복을 수행하는 동작을 정의할 수 있다.
+데이터를 받아서 f에 연속적으로 n번 적용하는 루프가 있다고 가정하자.
+이 함수의 이름은 repeat로 f라는 함수를 인수로 받는다.
+
+repeat(3, (Integer x) -> 2*x);
+
+위 코드를 실행하면 x -> (2*(2*(2*x))) 또는 x -> 8*x 라는 결과가 나온다.
+
+다음 코드로 결과를 확인할 수 있다.
+
+코드를 실행하면 80이 출력된다.
+
+System.out.println(repeat(3, (Integer x) -> 2*x).apply(10));
+
+repeat 메서드를 다음처럼 구현할 수 있다(루프를 한 번도 돌지 않는 상황은 예외적으로 처리함)
+
+```java
+static <A> Function<A,A> repeat(int n, Function<A,A> f) {
+	return n==0 ? x -> x	//n이 0이면 아무것도 하지 않는 함수를 반환
+		: compose(f, repeat(n-1, f));	//n이 0이 아니면 재귀적으로 compose를 반환)
+}
+```
+
+이 개념을 활용하면 반복 과정에서 전달되는 가변 상태 함수형 모델 등 반복 기능을 좀 더 다양하게 활용할 수 있다.
+이 장에서는 자바8에서 제공하는 함수형 프로그래밍을 전체적으로 소개했다.
+이것으로 함수형 프로그래밍에 대한 설명을 마친다.
+
+
 
 
 
